@@ -1,0 +1,4942 @@
+# /Users/laztrex/RustProjects/blog-project/Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "blog-server",
+    "blog-client",
+    "blog-cli",
+    "blog-wasm",
+]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+dirs = "5"
+
+tonic = "0.13"
+tonic-build = "0.13"
+prost = "0.13"
+prost-types = "0.13"
+
+actix-web = "4"
+actix-cors = "0.7"
+actix-web-httpauth = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "migrate", "chrono"] }
+dotenvy = "0.15"
+
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.69", features = [
+    "ReadableStream",
+    "Window",
+    "Document",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlButtonElement",
+    "HtmlTextAreaElement",
+    "Element",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "Storage",
+    "console"
+] }
+gloo-net = "0.6"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+
+clap = { version = "4", features = ["derive"] }
+
+# /Users/laztrex/RustProjects/blog-project/test.py
+import os
+import sys
+
+# Расширения файлов, которые заведомо бинарные и не нужны в выводе
+BINARY_EXTENSIONS = {'.o', '.rlib', '.d', '.so', '.dylib', '.dll', '.exe',
+                     '.bin', '.obj', '.pdb', '.wasm', '.gz', '.zip', '.tar',
+                     '.db', '.sqlite', '.pyc', '.pyo', '.parquet', '.arrow'}
+
+def should_exclude_dir(dirname):
+    """Исключаемые каталоги (не заходить внутрь)"""
+    return dirname in ("target", ".git", "node_modules", "__pycache__", "debug", "release")
+
+def should_exclude_file(filename):
+    """Исключаемые файлы по имени или расширению"""
+    if filename in ("Cargo.lock", "Cargo.toml.bak"):
+        return True
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in BINARY_EXTENSIONS
+
+def write_directory_contents_to_file(root_dir, output_file, encoding='utf-8'):
+    with open(output_file, 'w', encoding='utf-8') as out_f:
+        for current_dir, subdirs, files in os.walk(root_dir):
+            # 1. Проверяем имя текущего каталога (не полный путь)
+            dirname = os.path.basename(current_dir)
+            if should_exclude_dir(dirname):
+                # Очищаем список subdirs, чтобы os.walk не заходил внутрь
+                subdirs.clear()
+                continue
+
+            for file in files:
+                if should_exclude_file(file):
+                    continue
+
+                file_path = os.path.join(current_dir, file)
+                out_f.write(f"# {file_path}\n")
+
+                # 2. Дополнительная защита от больших файлов (например, логи)
+                try:
+                    size = os.path.getsize(file_path)
+                    if size > 50 * 1024 * 1024:  # 50 MB
+                        out_f.write(f"[Файл {size//1024//1024} МБ, пропущен]\n")
+                    else:
+                        with open(file_path, 'r', encoding=encoding, errors='replace') as in_f:
+                            content = in_f.read()
+                            out_f.write(content)
+                except Exception as e:
+                    out_f.write(f"[Ошибка чтения файла: {e}]\n")
+                out_f.write("\n\n")
+
+def main():
+    if len(sys.argv) == 1:
+        print("Использование:")
+        print("  python3 test.py <выходной_файл>            # обход текущей папки")
+        print("  python3 test.py <каталог> <выходной_файл>  # обход указанной папки")
+        sys.exit(1)
+
+    if len(sys.argv) == 2:
+        root_dir = os.getcwd()
+        output_file = sys.argv[1]
+    else:
+        root_dir = sys.argv[1]
+        output_file = sys.argv[2]
+        if not os.path.isdir(root_dir):
+            print(f"Ошибка: '{root_dir}' не является каталогом.")
+            sys.exit(1)
+
+    print(f"Обход каталога: {root_dir}")
+    print(f"Исключаются каталоги: target, .git, __pycache__, debug, release")
+    print(f"Исключаются бинарные расширения: {', '.join(sorted(BINARY_EXTENSIONS))}")
+    print(f"Запись результата в: {output_file}")
+    write_directory_contents_to_file(root_dir, output_file)
+    print(f"Готово. Файл создан: {output_file}")
+
+if __name__ == "__main__":
+    main()
+
+# /Users/laztrex/RustProjects/blog-project/README.md
+# Blog Project – Full-stack Rust блог с HTTP/gRPC, CLI и WASM фронтендом
+
+## Описание
+
+Проект представляет собой полноценную блог-платформу, реализованную на Rust с использованием современных технологий. Состоит из четырёх крейтов:
+
+- **blog-server** – backend сервер с HTTP API (Actix-web) и gRPC API (Tonic).  
+  Использует PostgreSQL, миграции SQLx, JWT-аутентификацию, хеширование паролей Argon2, CORS.
+- **blog-client** – библиотека для взаимодействия с сервером, поддерживающая HTTP и gRPC транспорты.
+- **blog-cli** – CLI клиент на базе `blog-client` и `clap`.
+- **blog-wasm** – фронтенд на Rust, компилируемый в WebAssembly, работает в браузере.
+
+### Архитектура
+
+`domain` (модели),  
+`application` (бизнес-логика),  
+`data` (репозитории),  
+`infrastructure` (БД, JWT, логирование),  
+`presentation` (HTTP/gRPC).
+
+---
+
+## Требования
+
+- Rust
+    ```bash
+    rustc --version
+    rustc 1.94.0 (4a4ef493e 2026-03-02)
+    ```
+    ```bash
+    cargo --version
+    cargo 1.94.0 (85eff7c80 2026-01-15)
+    ```
+- Docker (для PostgreSQL) или локальный PostgreSQL
+   ```bash
+   postgresql@15
+   ```
+- `wasm-pack` (для сборки WASM)
+- `python3` (для запуска простого HTTP-сервера)
+
+---
+
+## Установка и запуск
+
+### 1. PostgreSQL
+
+```bash
+docker run -d --name blog-db \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=blog_db \
+  -p 5432:5432 \
+  postgres:15
+```
+
+---
+
+### 2. Настройка окружения
+
+Скопируйте `.env.example` в `.env` в папке `blog-server` и отредактируйте:
+
+```bash
+cd blog-server
+cp .env.example .env
+```
+
+**Основные переменные:**
+
+- `DATABASE_URL` – строка подключения к PostgreSQL  
+- `JWT_SECRET` – секретный ключ для JWT (не менее 32 символов)
+
+**Опциональные:**
+
+- `HTTP_PORT`
+- `GRPC_PORT`
+- `JWT_EXPIRY_HOURS`
+- `DB_MAX_CONNECTIONS`
+- `DEFAULT_PAGINATION_LIMIT`
+
+---
+
+### 3. Запуск сервера
+
+```bash
+cargo run --bin blog-server
+```
+
+Сервер запустит:
+
+- HTTP API на порту **3000**
+- gRPC API на порту **50051**
+
+Миграции применятся автоматически.
+
+---
+
+## CLI клиент
+
+Все команды используют HTTP по умолчанию (порт 3000).  
+Для gRPC добавьте флаг `--grpc` (порт 50051).
+
+### Примеры:
+
+```bash
+# Регистрация
+cargo run --bin blog-cli -- register \
+  --username alice \
+  --email alice@example.com \
+  --password secret
+
+# Вход
+cargo run --bin blog-cli -- login \
+  --username alice \
+  --password secret
+
+# Создание поста
+cargo run --bin blog-cli -- create \
+  --title "Hello" \
+  --content "World"
+
+# Получение поста
+cargo run --bin blog-cli -- get --id 1
+
+# Список постов (пагинация)
+cargo run --bin blog-cli -- list --limit 10 --offset 0
+
+# Обновление поста
+cargo run --bin blog-cli -- update \
+  --id 1 \
+  --title "New title" \
+  --content "New content"
+
+# Удаление поста
+cargo run --bin blog-cli -- delete --id 1
+
+# Использование gRPC
+cargo run --bin blog-cli -- --grpc create \
+  --title "gRPC post" \
+  --content "via tonic"
+```
+
+---
+
+## WASM фронтенд
+
+### Сборка WASM-модуля
+
+```bash
+cd blog-wasm
+wasm-pack build --target web
+```
+
+### Запуск HTTP-сервера
+
+```bash
+python3 -m http.server 8000
+```
+
+Откройте браузер по адресу:
+
+```
+http://localhost:8000
+```
+
+Вы сможете:
+
+- зарегистрироваться
+- войти
+- создавать / редактировать / удалять посты
+
+Кнопки редактирования и удаления отображаются только для постов текущего пользователя.
+
+---
+
+## Тестирование
+
+### Модульные тесты (не требуют БД)
+
+```bash
+cargo test -p blog-server
+```
+
+---
+
+### Интеграционные тесты репозиториев
+
+Для запуска интеграционных тестов необходима отдельная тестовая база данных.
+
+```bash
+# Создание тестовой базы (если используется Docker)
+docker exec -it blog-db psql -U postgres \
+  -c "CREATE DATABASE blog_test;"
+
+# Запуск интеграционных тестов
+TEST_DATABASE_URL=postgres://postgres:password@localhost/blog_test \
+  cargo test -p blog-server --test integration_test -- --nocapture
+```
+
+---
+
+### Полный прогон всех тестов workspace
+
+```bash
+TEST_DATABASE_URL=postgres://postgres:password@localhost/blog_test \
+  cargo test --workspace
+```
+
+---
+
+## Примеры сценариев
+
+### HTTP API (curl)
+
+```bash
+# Регистрация
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"bob","email":"bob@ex.com","password":"123"}'
+
+# Логин (сохраните token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"bob","password":"123"}'
+
+# Создание поста (с токеном)
+curl -X POST http://localhost:3000/api/posts \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Curl post","content":"Hello"}'
+
+# Список постов
+curl "http://localhost:3000/api/posts?limit=5&offset=0"
+```
+
+---
+
+### gRPC (grpcurl)
+
+Установите `grpcurl`, затем:
+
+```bash
+# Регистрация
+grpcurl -plaintext \
+  -d '{"username":"charlie","email":"c@ex.com","password":"pass"}' \
+  localhost:50051 blog.BlogService/Register
+
+# Логин
+grpcurl -plaintext \
+  -d '{"username":"charlie","password":"pass"}' \
+  localhost:50051 blog.BlogService/Login
+
+# Создание поста (с токеном в метаданных)
+grpcurl -plaintext \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{"title":"gRPC demo","content":"hello"}' \
+  localhost:50051 blog.BlogService/CreatePost
+```
+
+---
+
+## Структура проекта
+
+```text
+blog-project/
+├── Cargo.toml                 # workspace
+├── blog-server/               # backend
+│   ├── migrations/            # SQL миграции
+│   ├── proto/                 # protobuf схема
+│   └── src/                   # исходники
+├── blog-client/               # клиентская библиотека
+├── blog-cli/                  # CLI клиент
+├── blog-wasm/                 # WASM фронтенд
+└── .github/workflows/ci.yaml  # CI
+```
+
+---
+
+## CI/CD
+
+Проект настроен на GitHub Actions:
+
+- проверка форматирования (`rustfmt`)
+- линтинг (`clippy`)
+- модульные тесты
+- интеграционные тесты (с PostgreSQL)
+- сборка релизной версии
+
+---
+
+## Лицензия
+
+MIT
+
+# /Users/laztrex/RustProjects/blog-project/.gitignore
+/target/
+**/*.rs.bk
+.env
+.blog_token
+Cargo.lock
+*.wasm
+pkg/
+
+# /Users/laztrex/RustProjects/blog-project/test.txt
+# /Users/laztrex/RustProjects/blog-project/Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "blog-server",
+    "blog-client",
+    "blog-cli",
+    "blog-wasm",
+]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+dirs = "5"
+
+tonic = "0.13"
+tonic-build = "0.13"
+prost = "0.13"
+prost-types = "0.13"
+
+actix-web = "4"
+actix-cors = "0.7"
+actix-web-httpauth = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "migrate", "chrono"] }
+dotenvy = "0.15"
+
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.69", features = [
+    "ReadableStream",
+    "Window",
+    "Document",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlButtonElement",
+    "HtmlTextAreaElement",
+    "Element",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "Storage",
+    "console"
+] }
+gloo-net = "0.6"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+
+clap = { version = "4", features = ["derive"] }
+
+# /Users/laztrex/RustProjects/blog-project/test.py
+import os
+import sys
+
+# Расширения файлов, которые заведомо бинарные и не нужны в выводе
+BINARY_EXTENSIONS = {'.o', '.rlib', '.d', '.so', '.dylib', '.dll', '.exe',
+                     '.bin', '.obj', '.pdb', '.wasm', '.gz', '.zip', '.tar',
+                     '.db', '.sqlite', '.pyc', '.pyo', '.parquet', '.arrow'}
+
+def should_exclude_dir(dirname):
+    """Исключаемые каталоги (не заходить внутрь)"""
+    return dirname in ("target", ".git", "node_modules", "__pycache__", "debug", "release")
+
+def should_exclude_file(filename):
+    """Исключаемые файлы по имени или расширению"""
+    if filename in ("Cargo.lock", "Cargo.toml.bak"):
+        return True
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in BINARY_EXTENSIONS
+
+def write_directory_contents_to_file(root_dir, output_file, encoding='utf-8'):
+    with open(output_file, 'w', encoding='utf-8') as out_f:
+        for current_dir, subdirs, files in os.walk(root_dir):
+            # 1. Проверяем имя текущего каталога (не полный путь)
+            dirname = os.path.basename(current_dir)
+            if should_exclude_dir(dirname):
+                # Очищаем список subdirs, чтобы os.walk не заходил внутрь
+                subdirs.clear()
+                continue
+
+            for file in files:
+                if should_exclude_file(file):
+                    continue
+
+                file_path = os.path.join(current_dir, file)
+                out_f.write(f"# {file_path}\n")
+
+                # 2. Дополнительная защита от больших файлов (например, логи)
+                try:
+                    size = os.path.getsize(file_path)
+                    if size > 50 * 1024 * 1024:  # 50 MB
+                        out_f.write(f"[Файл {size//1024//1024} МБ, пропущен]\n")
+                    else:
+                        with open(file_path, 'r', encoding=encoding, errors='replace') as in_f:
+                            content = in_f.read()
+                            out_f.write(content)
+                except Exception as e:
+                    out_f.write(f"[Ошибка чтения файла: {e}]\n")
+                out_f.write("\n\n")
+
+def main():
+    if len(sys.argv) == 1:
+        print("Использование:")
+        print("  python3 test.py <выходной_файл>            # обход текущей папки")
+        print("  python3 test.py <каталог> <выходной_файл>  # обход указанной папки")
+        sys.exit(1)
+
+    if len(sys.argv) == 2:
+        root_dir = os.getcwd()
+        output_file = sys.argv[1]
+    else:
+        root_dir = sys.argv[1]
+        output_file = sys.argv[2]
+        if not os.path.isdir(root_dir):
+            print(f"Ошибка: '{root_dir}' не является каталогом.")
+            sys.exit(1)
+
+    print(f"Обход каталога: {root_dir}")
+    print(f"Исключаются каталоги: target, .git, __pycache__, debug, release")
+    print(f"Исключаются бинарные расширения: {', '.join(sorted(BINARY_EXTENSIONS))}")
+    print(f"Запись результата в: {output_file}")
+    write_directory_contents_to_file(root_dir, output_file)
+    print(f"Готово. Файл создан: {output_file}")
+
+if __name__ == "__main__":
+    main()
+
+# /Users/laztrex/RustProjects/blog-project/README.md
+# Blog Project – Full-stack Rust блог с HTTP/gRPC, CLI и WASM фронтендом
+
+## Описание
+
+Проект представляет собой полноценную блог-платформу, реализованную на Rust с использованием современных технологий. Состоит из четырёх крейтов:
+
+- **blog-server** – backend сервер с HTTP API (Actix-web) и gRPC API (Tonic).  
+  Использует PostgreSQL, миграции SQLx, JWT-аутентификацию, хеширование паролей Argon2, CORS.
+- **blog-client** – библиотека для взаимодействия с сервером, поддерживающая HTTP и gRPC транспорты.
+- **blog-cli** – CLI клиент на базе `blog-client` и `clap`.
+- **blog-wasm** – фронтенд на Rust, компилируемый в WebAssembly, работает в браузере.
+
+### Архитектура
+
+`domain` (модели),  
+`application` (бизнес-логика),  
+`data` (репозитории),  
+`infrastructure` (БД, JWT, логирование),  
+`presentation` (HTTP/gRPC).
+
+---
+
+## Требования
+
+- Rust
+    ```bash
+    rustc --version
+    rustc 1.94.0 (4a4ef493e 2026-03-02)
+    ```
+    ```bash
+    cargo --version
+    cargo 1.94.0 (85eff7c80 2026-01-15)
+    ```
+- Docker (для PostgreSQL) или локальный PostgreSQL
+   ```bash
+   postgresql@15
+   ```
+- `wasm-pack` (для сборки WASM)
+- `python3` (для запуска простого HTTP-сервера)
+
+---
+
+## Установка и запуск
+
+### 1. PostgreSQL
+
+```bash
+docker run -d --name blog-db \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=blog_db \
+  -p 5432:5432 \
+  postgres:15
+```
+
+---
+
+### 2. Настройка окружения
+
+Скопируйте `.env.example` в `.env` в папке `blog-server` и отредактируйте:
+
+```bash
+cd blog-server
+cp .env.example .env
+```
+
+**Основные переменные:**
+
+- `DATABASE_URL` – строка подключения к PostgreSQL  
+- `JWT_SECRET` – секретный ключ для JWT (не менее 32 символов)
+
+**Опциональные:**
+
+- `HTTP_PORT`
+- `GRPC_PORT`
+- `JWT_EXPIRY_HOURS`
+- `DB_MAX_CONNECTIONS`
+- `DEFAULT_PAGINATION_LIMIT`
+
+---
+
+### 3. Запуск сервера
+
+```bash
+cargo run --bin blog-server
+```
+
+Сервер запустит:
+
+- HTTP API на порту **3000**
+- gRPC API на порту **50051**
+
+Миграции применятся автоматически.
+
+---
+
+## CLI клиент
+
+Все команды используют HTTP по умолчанию (порт 3000).  
+Для gRPC добавьте флаг `--grpc` (порт 50051).
+
+### Примеры:
+
+```bash
+# Регистрация
+cargo run --bin blog-cli -- register \
+  --username alice \
+  --email alice@example.com \
+  --password secret
+
+# Вход
+cargo run --bin blog-cli -- login \
+  --username alice \
+  --password secret
+
+# Создание поста
+cargo run --bin blog-cli -- create \
+  --title "Hello" \
+  --content "World"
+
+# Получение поста
+cargo run --bin blog-cli -- get --id 1
+
+# Список постов (пагинация)
+cargo run --bin blog-cli -- list --limit 10 --offset 0
+
+# Обновление поста
+cargo run --bin blog-cli -- update \
+  --id 1 \
+  --title "New title" \
+  --content "New content"
+
+# Удаление поста
+cargo run --bin blog-cli -- delete --id 1
+
+# Использование gRPC
+cargo run --bin blog-cli -- --grpc create \
+  --title "gRPC post" \
+  --content "via tonic"
+```
+
+---
+
+## WASM фронтенд
+
+### Сборка WASM-модуля
+
+```bash
+cd blog-wasm
+wasm-pack build --target web
+```
+
+### Запуск HTTP-сервера
+
+```bash
+python3 -m http.server 8000
+```
+
+Откройте браузер по адресу:
+
+```
+http://localhost:8000
+```
+
+Вы сможете:
+
+- зарегистрироваться
+- войти
+- создавать / редактировать / удалять посты
+
+Кнопки редактирования и удаления отображаются только для постов текущего пользователя.
+
+---
+
+## Тестирование
+
+### Модульные тесты (не требуют БД)
+
+```bash
+cargo test -p blog-server
+```
+
+---
+
+### Интеграционные тесты репозиториев
+
+Для запуска интеграционных тестов необходима отдельная тестовая база данных.
+
+```bash
+# Создание тестовой базы (если используется Docker)
+docker exec -it blog-db psql -U postgres \
+  -c "CREATE DATABASE blog_test;"
+
+# Запуск интеграционных тестов
+TEST_DATABASE_URL=postgres://postgres:password@localhost/blog_test \
+  cargo test -p blog-server --test integration_test -- --nocapture
+```
+
+---
+
+### Полный прогон всех тестов workspace
+
+```bash
+TEST_DATABASE_URL=postgres://postgres:password@localhost/blog_test \
+  cargo test --workspace
+```
+
+---
+
+## Примеры сценариев
+
+### HTTP API (curl)
+
+```bash
+# Регистрация
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"bob","email":"bob@ex.com","password":"123"}'
+
+# Логин (сохраните token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"bob","password":"123"}'
+
+# Создание поста (с токеном)
+curl -X POST http://localhost:3000/api/posts \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Curl post","content":"Hello"}'
+
+# Список постов
+curl "http://localhost:3000/api/posts?limit=5&offset=0"
+```
+
+---
+
+### gRPC (grpcurl)
+
+Установите `grpcurl`, затем:
+
+```bash
+# Регистрация
+grpcurl -plaintext \
+  -d '{"username":"charlie","email":"c@ex.com","password":"pass"}' \
+  localhost:50051 blog.BlogService/Register
+
+# Логин
+grpcurl -plaintext \
+  -d '{"username":"charlie","password":"pass"}' \
+  localhost:50051 blog.BlogService/Login
+
+# Создание поста (с токеном в метаданных)
+grpcurl -plaintext \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{"title":"gRPC demo","content":"hello"}' \
+  localhost:50051 blog.BlogService/CreatePost
+```
+
+---
+
+## Структура проекта
+
+```text
+blog-project/
+├── Cargo.toml                 # workspace
+├── blog-server/               # backend
+│   ├── migrations/            # SQL миграции
+│   ├── proto/                 # protobuf схема
+│   └── src/                   # исходники
+├── blog-client/               # клиентская библиотека
+├── blog-cli/                  # CLI клиент
+├── blog-wasm/                 # WASM фронтенд
+└── .github/workflows/ci.yaml  # CI
+```
+
+---
+
+## CI/CD
+
+Проект настроен на GitHub Actions:
+
+- проверка форматирования (`rustfmt`)
+- линтинг (`clippy`)
+- модульные тесты
+- интеграционные тесты (с PostgreSQL)
+- сборка релизной версии
+
+---
+
+## Лицензия
+
+MIT
+
+# /Users/laztrex/RustProjects/blog-project/commands.txt
+# ============================================================
+# 1. ПОДГОТОВКА ОКРУЖЕНИЯ (выполняется в первом терминале)
+# ============================================================
+
+git clone <url-вашего-репозитория> blog-project
+cd blog-project
+
+# Запуск PostgreSQL через Docker
+docker run -d --name blog-db -e POSTGRES_PASSWORD=password -e POSTGRES_DB=blog_db -p 5432:5432 postgres:15
+
+# Проверка, что контейнер запущен
+docker ps | grep blog-db
+
+# Настройка переменных окружения
+cd blog-server
+cp .env.example .env
+cat .env   # убедитесь, что DATABASE_URL и JWT_SECRET заданы
+cd ..
+
+# Сборка всего workspace
+cargo build --workspace
+
+# ============================================================
+# 2. ЗАПУСК СЕРВЕРА (второй терминал)
+# ============================================================
+
+cd /path/to/blog-project   # укажите полный путь к проекту
+cargo run --bin blog-server
+
+# Ожидаемый вывод:
+# INFO: Database migrations applied
+# INFO: Starting servers: HTTP on 0.0.0.0:3000, gRPC on 0.0.0.0:50051
+
+# ============================================================
+# 3. ПРОВЕРКА HTTP API (третий терминал)
+# ============================================================
+
+# Регистрация
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","email":"alice@example.com","password":"secret"}'
+
+# Логин (сохраните token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret"}'
+
+# Создание поста (замените TOKEN на полученный)
+TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+curl -X POST http://localhost:3000/api/posts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Hello from curl","content":"This is my first post"}'
+
+# Получение поста (публичный)
+curl http://localhost:3000/api/posts/1
+
+# Список постов с пагинацией
+curl "http://localhost:3000/api/posts?limit=5&offset=0"
+
+# Обновление поста
+curl -X PUT http://localhost:3000/api/posts/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Updated title","content":"Updated content"}'
+
+# Удаление поста
+curl -X DELETE http://localhost:3000/api/posts/1 \
+  -H "Authorization: Bearer $TOKEN"
+
+# ============================================================
+# 4. ПРОВЕРКА gRPC API (требуется grpcurl)
+# ============================================================
+
+# Установка grpcurl (если не установлен)
+# macOS: brew install grpcurl
+# Linux: go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+
+# Регистрация
+grpcurl -plaintext -d '{"username":"bob","email":"bob@ex.com","password":"123"}' \
+  localhost:50051 blog.BlogService/Register
+
+# Логин (сохраните token)
+grpcurl -plaintext -d '{"username":"bob","password":"123"}' \
+  localhost:50051 blog.BlogService/Login
+
+# Создание поста (замените TOKEN_GRPC)
+TOKEN_GRPC="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+grpcurl -plaintext -H "Authorization: Bearer $TOKEN_GRPC" \
+  -d '{"title":"gRPC post","content":"via tonic"}' \
+  localhost:50051 blog.BlogService/CreatePost
+
+# Список постов
+grpcurl -plaintext -d '{"limit":10,"offset":0}' \
+  localhost:50051 blog.BlogService/ListPosts
+
+# ============================================================
+# 5. ПРОВЕРКА CLI-КЛИЕНТА (третий терминал, или тот же после curl)
+# ============================================================
+
+# Регистрация (HTTP)
+cargo run --bin blog-cli -- register --username charlie --email charlie@ex.com --password pass
+
+# Логин
+cargo run --bin blog-cli -- login --username charlie --password pass
+
+# Создание поста (HTTP)
+cargo run --bin blog-cli -- create --title "CLI post" --content "Hello from CLI"
+
+# Список постов
+cargo run --bin blog-cli -- list --limit 5
+
+# Получение поста
+cargo run --bin blog-cli -- get --id 2   (id может быть другим)
+
+# Обновление поста
+cargo run --bin blog-cli -- update --id 2 --title "Updated CLI title" --content "New content"
+
+# Удаление поста
+cargo run --bin blog-cli -- delete --id 2
+
+# Использование gRPC-транспорта
+cargo run --bin blog-cli -- --grpc create --title "gRPC via CLI" --content "Works!"
+
+# ============================================================
+# 6. ПРОВЕРКА WASM-ФРОНТЕНДА (четвёртый терминал)
+# ============================================================
+
+cd blog-wasm
+wasm-pack build --target web
+python3 -m http.server 8000
+
+# Откройте браузер по адресу http://localhost:8000
+# Выполните:
+# - Регистрацию нового пользователя (username, email, password)
+# - Вход
+# - Создание поста
+# - Редактирование и удаление поста (кнопки Edit/Delete должны быть видны только для ваших постов)
+# - Выход (кнопка Logout)
+
+# ============================================================
+# 7. ЗАПУСК ТЕСТОВ (третий или пятый терминал)
+# ============================================================
+
+# Модульные тесты доменных моделей
+cargo test --package blog-server --lib
+
+# Интеграционные тесты (требуют тестовой БД)
+docker exec -it blog-db psql -U postgres -c "CREATE DATABASE blog_test;"
+cargo test --package blog-server --test integration_test -- --nocapture
+
+# Все тесты workspace
+cargo test --workspace
+
+# ============================================================
+# 8. ФОРМАТИРОВАНИЕ И ЛИНТИНГ
+# ============================================================
+
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+
+# ============================================================
+# 9. ПРОВЕРКА МИГРАЦИЙ (вручную)
+# ============================================================
+
+docker exec -it blog-db psql -U postgres -d blog_db -c "\dt"
+docker exec -it blog-db psql -U postgres -d blog_db -c "SELECT * FROM users;"
+docker exec -it blog-db psql -U postgres -d blog_db -c "SELECT * FROM posts;"
+
+# ============================================================
+# 10. ОСТАНОВКА И ОЧИСТКА (по желанию)
+# ============================================================
+
+docker rm -f blog-db
+cargo clean
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/Cargo.toml
+[package]
+name = "blog-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+
+actix-web = { workspace = true }
+actix-cors = { workspace = true }
+actix-web-httpauth = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+sqlx = { workspace = true }
+dotenvy = { workspace = true }
+
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/build.rs
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=proto/blog.proto");
+    tonic_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .compile_protos(&["proto/blog.proto"], &["proto"])?;
+    Ok(())
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/.env
+DATABASE_URL=postgres://postgres:password@localhost/blog_db
+JWT_SECRET=very_long_secret_key_at_least_32_characters_long
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/.env.example
+DATABASE_URL=postgres://postgres:password@localhost/blog_db
+JWT_SECRET=very_long_secret_key_at_least_32_characters_long
+
+# Опциональные настройки
+HTTP_PORT=3000
+GRPC_PORT=50051
+JWT_EXPIRY_HOURS=24
+DB_MAX_CONNECTIONS=5
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/migrations/20250101000001_create_users.sql
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_email ON users(email);
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/migrations/20250101000002_create_posts.sql
+CREATE TABLE IF NOT EXISTS posts (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    author_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_posts_created_at ON posts(created_at);
+CREATE INDEX idx_posts_author_id ON posts(author_id);
+
+-- Триггер для обновления updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_posts_updated_at
+    BEFORE UPDATE ON posts
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/proto/blog.proto
+syntax = "proto3";
+
+package blog;
+
+service BlogService {
+    // Аутентификация
+    rpc Register(RegisterRequest) returns (AuthResponse);
+    rpc Login(LoginRequest) returns (AuthResponse);
+    
+    // CRUD постов
+    rpc CreatePost(CreatePostRequest) returns (PostResponse);
+    rpc GetPost(GetPostRequest) returns (PostResponse);
+    rpc UpdatePost(UpdatePostRequest) returns (PostResponse);
+    rpc DeletePost(DeletePostRequest) returns (Empty);
+    rpc ListPosts(ListPostsRequest) returns (ListPostsResponse);
+}
+
+message RegisterRequest {
+    string username = 1;
+    string email = 2;
+    string password = 3;
+}
+
+message LoginRequest {
+    string username = 1;
+    string password = 2;
+}
+
+message AuthResponse {
+    string token = 1;
+    User user = 2;
+}
+
+message User {
+    int64 id = 1;
+    string username = 2;
+    string email = 3;
+    string created_at = 4;
+}
+
+message CreatePostRequest {
+    string title = 1;
+    string content = 2;
+}
+
+message GetPostRequest {
+    int64 id = 1;
+}
+
+message UpdatePostRequest {
+    int64 id = 1;
+    string title = 2;
+    string content = 3;
+}
+
+message DeletePostRequest {
+    int64 id = 1;
+}
+
+message PostResponse {
+    int64 id = 1;
+    string title = 2;
+    string content = 3;
+    int64 author_id = 4;
+    string created_at = 5;
+    string updated_at = 6;
+}
+
+message ListPostsRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message ListPostsResponse {
+    repeated PostResponse posts = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message Empty {}
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/tests/integration_test.rs
+#[cfg(test)]
+mod tests {
+    use sqlx::PgPool;
+    use blog_server::data::{user_repository::{PostgresUserRepository, UserRepository}, post_repository::{PostgresPostRepository, PostRepository}};
+    use blog_server::domain::post::Post;
+
+    async fn get_test_pool() -> PgPool {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:password@localhost/blog_test".to_string());
+        sqlx::PgPool::connect(&database_url).await.unwrap()
+    }
+
+    #[sqlx::test]
+    async fn test_user_crud() {
+        let pool = get_test_pool().await;
+        let repo = PostgresUserRepository::new(pool);
+        let user = repo.create("testuser", "test@ex.com", "hash").await.unwrap();
+        assert_eq!(user.username, "testuser");
+        let found = repo.find_by_username("testuser").await.unwrap();
+        assert_eq!(found.id, user.id);
+        let by_id = repo.find_by_id(user.id).await.unwrap();
+        assert_eq!(by_id.email, "test@ex.com");
+    }
+
+    #[sqlx::test]
+    async fn test_post_crud() {
+        let pool = get_test_pool().await;
+        let user_repo = PostgresUserRepository::new(pool.clone());
+        let post_repo = PostgresPostRepository::new(pool);
+        let user = user_repo.create("author", "author@ex.com", "hash").await.unwrap();
+        let post = Post::new("Title".to_string(), "Content".to_string(), user.id);
+        let created = post_repo.create(&post).await.unwrap();
+        assert_eq!(created.title, "Title");
+        let fetched = post_repo.find_by_id(created.id).await.unwrap();
+        assert_eq!(fetched.content, "Content");
+        let updated = post_repo.update(created.id, "New", "New content").await.unwrap();
+        assert_eq!(updated.title, "New");
+        post_repo.delete(created.id).await.unwrap();
+        assert!(post_repo.find_by_id(created.id).await.is_err());
+    }
+}
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/lib.rs
+pub mod application;
+pub mod data;
+pub mod domain;
+pub mod infrastructure;
+pub mod presentation;
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/main.rs
+use std::sync::Arc;
+use tokio::select;
+use tracing::{error, info};
+
+use blog_server::application::{auth_service::AuthService, blog_service::BlogService};
+use blog_server::data::{post_repository::PostgresPostRepository, user_repository::PostgresUserRepository};
+use blog_server::infrastructure::{
+    config::AppConfig, database::create_pool, jwt::JwtService, logging::init_logging,
+};
+use blog_server::presentation;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    init_logging();
+
+    let config = AppConfig::from_env();
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+
+    let pool = create_pool(&database_url, config.db_max_connections).await?;
+    sqlx::migrate!().run(&pool).await?;
+    info!("Database migrations applied");
+
+    let jwt_service = Arc::new(JwtService::new(&jwt_secret, config.jwt_expiry_hours));
+
+    let user_repo = Arc::new(PostgresUserRepository::new(pool.clone()))
+        as Arc<dyn blog_server::data::user_repository::UserRepository>;
+    let post_repo = Arc::new(PostgresPostRepository::new(pool.clone()))
+        as Arc<dyn blog_server::data::post_repository::PostRepository>;
+
+    let auth_service = Arc::new(AuthService::new(user_repo.clone(), jwt_service.clone()));
+    let blog_service = Arc::new(BlogService::new(post_repo.clone(), user_repo.clone()));
+
+    let http_server = presentation::http_handlers::run_http_server(
+        auth_service.clone(),
+        blog_service.clone(),
+        jwt_service.clone(),
+        config.http_port,
+    )?;
+
+    let grpc_server = match presentation::grpc_service::run_grpc_server(
+        auth_service,
+        blog_service,
+        jwt_service,
+        config.grpc_port,
+    ) {
+        Ok(server) => server,
+        Err(e) => {
+            error!("Failed to start gRPC server: {}", e);
+            return Err(anyhow::anyhow!("{}", e));
+        }
+    };
+
+    info!(
+        "Starting servers: HTTP on 0.0.0.0:{}, gRPC on 0.0.0.0:{}",
+        config.http_port, config.grpc_port
+    );
+    select! {
+        res = http_server => {
+            if let Err(e) = res {
+                error!("HTTP server error: {}", e);
+            }
+        }
+        res = grpc_server => {
+            if let Err(e) = res {
+                error!("gRPC server error: {}", e);
+            }
+        }
+    }
+    Ok(())
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/application/auth_service.rs
+use crate::data::user_repository::UserRepository;
+use crate::domain::error::DomainError;
+use crate::domain::user::{LoginUser, RegisterUser, User};
+use crate::infrastructure::jwt::JwtService;
+
+use std::sync::Arc;
+
+use argon2::password_hash::{rand_core::OsRng, SaltString};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+
+pub struct AuthService {
+    user_repo: Arc<dyn UserRepository>,
+    jwt_service: Arc<JwtService>,
+}
+
+impl AuthService {
+    pub fn new(user_repo: Arc<dyn UserRepository>, jwt_service: Arc<JwtService>) -> Self {
+        Self {
+            user_repo,
+            jwt_service,
+        }
+    }
+
+    pub async fn register(&self, input: RegisterUser) -> Result<(String, User), DomainError> {
+        if self
+            .user_repo
+            .find_by_username(&input.username)
+            .await
+            .is_ok()
+        {
+            return Err(DomainError::UserAlreadyExists);
+        }
+
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2
+            .hash_password(input.password.as_bytes(), &salt)
+            .map_err(|e| DomainError::Argon2(e.to_string()))?
+            .to_string();
+
+        let user = self
+            .user_repo
+            .create(&input.username, &input.email, &password_hash)
+            .await?;
+        let token = self.jwt_service.generate_token(user.id, &user.username)?;
+        Ok((token, user))
+    }
+
+    pub async fn login(&self, input: LoginUser) -> Result<(String, User), DomainError> {
+        let user = self.user_repo.find_by_username(&input.username).await?;
+        let parsed_hash = PasswordHash::new(&user.password_hash)
+            .map_err(|e| DomainError::Argon2(e.to_string()))?;
+        let argon2 = Argon2::default();
+        argon2
+            .verify_password(input.password.as_bytes(), &parsed_hash)
+            .map_err(|_| DomainError::InvalidCredentials)?;
+        let token = self.jwt_service.generate_token(user.id, &user.username)?;
+        Ok((token, user))
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/application/mod.rs
+pub mod auth_service;
+pub mod blog_service;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/application/blog_service.rs
+use crate::data::post_repository::PostRepository;
+use crate::data::user_repository::UserRepository;
+use crate::domain::error::DomainError;
+use crate::domain::post::{CreatePost, Post, UpdatePost};
+
+use std::sync::Arc;
+
+pub struct BlogService {
+    post_repo: Arc<dyn PostRepository>,
+    user_repo: Arc<dyn UserRepository>,
+}
+
+impl BlogService {
+    pub fn new(post_repo: Arc<dyn PostRepository>, user_repo: Arc<dyn UserRepository>) -> Self {
+        Self {
+            post_repo,
+            user_repo,
+        }
+    }
+
+    pub async fn create_post(
+        &self,
+        author_id: i64,
+        input: CreatePost,
+    ) -> Result<Post, DomainError> {
+        self.user_repo.find_by_id(author_id).await?;
+        let post = Post::new(input.title, input.content, author_id);
+        self.post_repo.create(&post).await
+    }
+
+    pub async fn get_post(&self, id: i64) -> Result<Post, DomainError> {
+        self.post_repo.find_by_id(id).await
+    }
+
+    pub async fn update_post(
+        &self,
+        id: i64,
+        author_id: i64,
+        input: UpdatePost,
+    ) -> Result<Post, DomainError> {
+        let post = self.post_repo.find_by_id(id).await?;
+        if post.author_id != author_id {
+            return Err(DomainError::Forbidden);
+        }
+        self.post_repo
+            .update(id, &input.title, &input.content)
+            .await
+    }
+
+    pub async fn delete_post(&self, id: i64, author_id: i64) -> Result<(), DomainError> {
+        let post = self.post_repo.find_by_id(id).await?;
+        if post.author_id != author_id {
+            return Err(DomainError::Forbidden);
+        }
+        self.post_repo.delete(id).await
+    }
+
+    pub async fn list_posts(
+        &self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<(Vec<Post>, i64), DomainError> {
+        self.post_repo.list(limit, offset).await
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/infrastructure/database.rs
+use crate::domain::error::DomainError;
+use sqlx::{postgres::PgPoolOptions, PgPool};
+
+pub async fn create_pool(database_url: &str, max_connections: u32) -> Result<PgPool, DomainError> {
+    let pool = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .connect(database_url)
+        .await?;
+    Ok(pool)
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/infrastructure/config.rs
+use std::env;
+
+/// Конфигурация приложения, загружаемая из переменных окружения.
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub http_port: u16,
+    pub grpc_port: u16,
+    pub jwt_expiry_hours: i64,
+    pub db_max_connections: u32,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Self {
+        Self {
+            http_port: env::var("HTTP_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3000),
+            grpc_port: env::var("GRPC_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50051),
+            jwt_expiry_hours: env::var("JWT_EXPIRY_HOURS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(24),
+            db_max_connections: env::var("DB_MAX_CONNECTIONS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5),
+        }
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/infrastructure/logging.rs
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+pub fn init_logging() {
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/infrastructure/mod.rs
+pub mod config;
+pub mod database;
+pub mod jwt;
+pub mod logging;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/infrastructure/jwt.rs
+//! Модуль работы с JWT (JSON Web Tokens).
+//! Содержит структуры Claims и JwtService для генерации и проверки токенов.
+
+use crate::domain::error::DomainError;
+
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: i64,
+    pub username: String,
+    pub exp: usize,
+}
+
+pub struct JwtService {
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey,
+    expiry_hours: i64,
+}
+
+/// Создаёт новый сервис JWT.
+/// Arguments:
+/// `secret` – секретный ключ для подписи (не менее 32 символов).
+/// `expiry_hours` – время жизни токена в часах.
+impl JwtService {
+    pub fn new(secret: &str, expiry_hours: i64) -> Self {
+        Self {
+            encoding_key: EncodingKey::from_secret(secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+            expiry_hours,
+        }
+    }
+
+    /// Генерирует новый JWT-токен для пользователя.
+    /// Arguments:
+    /// `user_id` – идентификатор пользователя.
+    /// `username` – имя пользователя.
+    ///
+    /// Return:
+    /// JWT-токен как строка.
+    pub fn generate_token(&self, user_id: i64, username: &str) -> Result<String, DomainError> {
+        let expiration = Utc::now() + Duration::hours(self.expiry_hours);
+        let claims = Claims {
+            sub: user_id,
+            username: username.to_string(),
+            exp: expiration.timestamp() as usize,
+        };
+        let token = encode(&Header::default(), &claims, &self.encoding_key)?;
+        Ok(token)
+    }
+
+    /// Проверяет JWT-токен и извлекает claims.
+    /// Return:
+    /// Claims при успехе, иначе ошибка DomainError::Jwt.
+    pub fn verify_token(&self, token: &str) -> Result<Claims, DomainError> {
+        let validation = Validation::default();
+        let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
+        Ok(token_data.claims)
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/data/mod.rs
+pub mod post_repository;
+pub mod user_repository;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/data/post_repository.rs
+//! Реализация репозитория постов на PostgreSQL.
+
+use crate::domain::error::DomainError;
+use crate::domain::post::Post;
+
+use async_trait::async_trait;
+use sqlx::{PgPool, Row};
+
+#[async_trait]
+pub trait PostRepository: Send + Sync {
+    async fn create(&self, post: &Post) -> Result<Post, DomainError>;
+    async fn find_by_id(&self, id: i64) -> Result<Post, DomainError>;
+    async fn update(&self, id: i64, title: &str, content: &str) -> Result<Post, DomainError>;
+    async fn delete(&self, id: i64) -> Result<(), DomainError>;
+    async fn list(&self, limit: i32, offset: i32) -> Result<(Vec<Post>, i64), DomainError>;
+}
+
+pub struct PostgresPostRepository {
+    pool: PgPool,
+}
+
+impl PostgresPostRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl PostRepository for PostgresPostRepository {
+    async fn create(&self, post: &Post) -> Result<Post, DomainError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO posts (title, content, author_id)
+            VALUES ($1, $2, $3)
+            RETURNING id, title, content, author_id, created_at, updated_at
+            "#,
+        )
+        .bind(&post.title)
+        .bind(&post.content)
+        .bind(post.author_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(Post {
+            id: row.try_get("id")?,
+            title: row.try_get("title")?,
+            content: row.try_get("content")?,
+            author_id: row.try_get("author_id")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+
+    async fn find_by_id(&self, id: i64) -> Result<Post, DomainError> {
+        let row = sqlx::query(
+            "SELECT id, title, content, author_id, created_at, updated_at FROM posts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(Post {
+                id: row.try_get("id")?,
+                title: row.try_get("title")?,
+                content: row.try_get("content")?,
+                author_id: row.try_get("author_id")?,
+                created_at: row.try_get("created_at")?,
+                updated_at: row.try_get("updated_at")?,
+            }),
+            None => Err(DomainError::PostNotFound),
+        }
+    }
+
+    async fn update(&self, id: i64, title: &str, content: &str) -> Result<Post, DomainError> {
+        let row = sqlx::query(
+            "UPDATE posts SET title = $1, content = $2 WHERE id = $3 RETURNING id, title, content, author_id, created_at, updated_at"
+        )
+        .bind(title)
+        .bind(content)
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(Post {
+            id: row.try_get("id")?,
+            title: row.try_get("title")?,
+            content: row.try_get("content")?,
+            author_id: row.try_get("author_id")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+
+    async fn delete(&self, id: i64) -> Result<(), DomainError> {
+        sqlx::query("DELETE FROM posts WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn list(&self, limit: i32, offset: i32) -> Result<(Vec<Post>, i64), DomainError> {
+        let total: i64 = sqlx::query("SELECT COUNT(*) FROM posts")
+            .fetch_one(&self.pool)
+            .await?
+            .try_get(0)?;
+        let rows = sqlx::query(
+            "SELECT id, title, content, author_id, created_at, updated_at FROM posts ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        let posts = rows
+            .iter()
+            .map(|row| Post {
+                id: row.try_get("id").unwrap(),
+                title: row.try_get("title").unwrap(),
+                content: row.try_get("content").unwrap(),
+                author_id: row.try_get("author_id").unwrap(),
+                created_at: row.try_get("created_at").unwrap(),
+                updated_at: row.try_get("updated_at").unwrap(),
+            })
+            .collect();
+        Ok((posts, total))
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/data/user_repository.rs
+//! Реализация репозитория пользователей на PostgreSQL.
+
+use crate::domain::error::DomainError;
+use crate::domain::user::User;
+
+use async_trait::async_trait;
+use sqlx::{PgPool, Row};
+
+#[async_trait]
+pub trait UserRepository: Send + Sync {
+    async fn create(
+        &self,
+        username: &str,
+        email: &str,
+        password_hash: &str,
+    ) -> Result<User, DomainError>;
+    async fn find_by_username(&self, username: &str) -> Result<User, DomainError>;
+    async fn find_by_id(&self, id: i64) -> Result<User, DomainError>;
+}
+
+pub struct PostgresUserRepository {
+    pool: PgPool,
+}
+
+impl PostgresUserRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl UserRepository for PostgresUserRepository {
+    async fn create(
+        &self,
+        username: &str,
+        email: &str,
+        password_hash: &str,
+    ) -> Result<User, DomainError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO users (username, email, password_hash)
+            VALUES ($1, $2, $3)
+            RETURNING id, username, email, password_hash, created_at
+            "#,
+        )
+        .bind(username)
+        .bind(email)
+        .bind(password_hash)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(User {
+            id: row.try_get("id")?,
+            username: row.try_get("username")?,
+            email: row.try_get("email")?,
+            password_hash: row.try_get("password_hash")?,
+            created_at: row.try_get("created_at")?,
+        })
+    }
+
+    async fn find_by_username(&self, username: &str) -> Result<User, DomainError> {
+        let row = sqlx::query(
+            "SELECT id, username, email, password_hash, created_at FROM users WHERE username = $1",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(User {
+                id: row.try_get("id")?,
+                username: row.try_get("username")?,
+                email: row.try_get("email")?,
+                password_hash: row.try_get("password_hash")?,
+                created_at: row.try_get("created_at")?,
+            }),
+            None => Err(DomainError::UserNotFound),
+        }
+    }
+
+    async fn find_by_id(&self, id: i64) -> Result<User, DomainError> {
+        let row = sqlx::query(
+            "SELECT id, username, email, password_hash, created_at FROM users WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(User {
+                id: row.try_get("id")?,
+                username: row.try_get("username")?,
+                email: row.try_get("email")?,
+                password_hash: row.try_get("password_hash")?,
+                created_at: row.try_get("created_at")?,
+            }),
+            None => Err(DomainError::UserNotFound),
+        }
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/domain/error.rs
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum DomainError {
+    #[error("User not found")]
+    UserNotFound,
+    #[error("User already exists")]
+    UserAlreadyExists,
+    #[error("Invalid credentials")]
+    InvalidCredentials,
+    #[error("Post not found")]
+    PostNotFound,
+    #[error("Forbidden: you are not the author")]
+    Forbidden,
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("JWT error: {0}")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("Argon2 error: {0}")]
+    Argon2(String),
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/domain/post.rs
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Post {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    pub author_id: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Post {
+    pub fn new(title: String, content: String, author_id: i64) -> Self {
+        let now = Utc::now();
+        Self {
+            id: 0,
+            title,
+            content,
+            author_id,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePost {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatePost {
+    pub title: String,
+    pub content: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn test_post_new() {
+        let post = Post::new("Title".to_string(), "Content".to_string(), 42);
+        assert_eq!(post.title, "Title");
+        assert_eq!(post.content, "Content");
+        assert_eq!(post.author_id, 42);
+        assert_eq!(post.id, 0);
+        assert!(post.created_at <= Utc::now());
+        assert!(post.updated_at <= Utc::now());
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/domain/user.rs
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub email: String,
+    pub password_hash: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterUser {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginUser {
+    pub username: String,
+    pub password: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_fields() {
+        let user = User {
+            id: 1,
+            username: "test".to_string(),
+            email: "test@ex.com".to_string(),
+            password_hash: "hash".to_string(),
+            created_at: Utc::now(),
+        };
+        assert_eq!(user.id, 1);
+        assert_eq!(user.username, "test");
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/domain/mod.rs
+pub mod error;
+pub mod post;
+pub mod user;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/presentation/http_handlers.rs
+use crate::application::{auth_service::AuthService, blog_service::BlogService};
+use crate::domain::{
+    error::DomainError, post::CreatePost, post::UpdatePost, user::LoginUser, user::RegisterUser,
+};
+use crate::presentation::middleware::{jwt_validator, AuthenticatedUser};
+use actix_cors::Cors;
+use actix_web::{web, App, HttpMessage, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web_httpauth::middleware::HttpAuthentication;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Deserialize)]
+struct RegisterForm {
+    username: String,
+    email: String,
+    password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginForm {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreatePostForm {
+    title: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePostForm {
+    title: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListQuery {
+    limit: Option<i32>,
+    offset: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthResponse {
+    token: String,
+    user: UserResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct UserResponse {
+    id: i64,
+    username: String,
+    email: String,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PostResponse {
+    id: i64,
+    title: String,
+    content: String,
+    author_id: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ListPostsResponse {
+    posts: Vec<PostResponse>,
+    total: i64,
+    limit: i32,
+    offset: i32,
+}
+
+async fn register(
+    auth_service: web::Data<Arc<AuthService>>,
+    form: web::Json<RegisterForm>,
+) -> impl Responder {
+    let input = RegisterUser {
+        username: form.username.clone(),
+        email: form.email.clone(),
+        password: form.password.clone(),
+    };
+    match auth_service.register(input).await {
+        Ok((token, user)) => HttpResponse::Created().json(AuthResponse {
+            token,
+            user: UserResponse {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                created_at: user.created_at.to_rfc3339(),
+            },
+        }),
+        Err(DomainError::UserAlreadyExists) => HttpResponse::Conflict().body("User already exists"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Registration error: {}", e)),
+    }
+}
+
+async fn login(
+    auth_service: web::Data<Arc<AuthService>>,
+    form: web::Json<LoginForm>,
+) -> impl Responder {
+    let input = LoginUser {
+        username: form.username.clone(),
+        password: form.password.clone(),
+    };
+    match auth_service.login(input).await {
+        Ok((token, user)) => HttpResponse::Ok().json(AuthResponse {
+            token,
+            user: UserResponse {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                created_at: user.created_at.to_rfc3339(),
+            },
+        }),
+        Err(DomainError::InvalidCredentials) => {
+            HttpResponse::Unauthorized().body("Invalid credentials")
+        }
+        Err(DomainError::UserNotFound) => HttpResponse::Unauthorized().body("User not found"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Login error: {}", e)),
+    }
+}
+
+async fn create_post(
+    blog_service: web::Data<Arc<BlogService>>,
+    req: HttpRequest,
+    form: web::Json<CreatePostForm>,
+) -> impl Responder {
+    let user = req
+        .extensions()
+        .get::<AuthenticatedUser>()
+        .expect("AuthenticatedUser missing – middleware should guarantee this")
+        .clone();
+    let input = CreatePost {
+        title: form.title.clone(),
+        content: form.content.clone(),
+    };
+    match blog_service.create_post(user.user_id, input).await {
+        Ok(post) => HttpResponse::Created().json(PostResponse {
+            id: post.id,
+            title: post.title,
+            content: post.content,
+            author_id: post.author_id,
+            created_at: post.created_at.to_rfc3339(),
+            updated_at: post.updated_at.to_rfc3339(),
+        }),
+        Err(DomainError::UserNotFound) => HttpResponse::NotFound().body("Author not found"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Create post error: {}", e)),
+    }
+}
+
+async fn get_post(
+    blog_service: web::Data<Arc<BlogService>>,
+    path: web::Path<i64>,
+) -> impl Responder {
+    let id = path.into_inner();
+    match blog_service.get_post(id).await {
+        Ok(post) => HttpResponse::Ok().json(PostResponse {
+            id: post.id,
+            title: post.title,
+            content: post.content,
+            author_id: post.author_id,
+            created_at: post.created_at.to_rfc3339(),
+            updated_at: post.updated_at.to_rfc3339(),
+        }),
+        Err(DomainError::PostNotFound) => HttpResponse::NotFound().body("Post not found"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Get post error: {}", e)),
+    }
+}
+
+async fn update_post(
+    blog_service: web::Data<Arc<BlogService>>,
+    req: HttpRequest,
+    path: web::Path<i64>,
+    form: web::Json<UpdatePostForm>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let user = req
+        .extensions()
+        .get::<AuthenticatedUser>()
+        .expect("AuthenticatedUser missing – middleware should guarantee this")
+        .clone();
+    let input = UpdatePost {
+        title: form.title.clone(),
+        content: form.content.clone(),
+    };
+    match blog_service.update_post(id, user.user_id, input).await {
+        Ok(post) => HttpResponse::Ok().json(PostResponse {
+            id: post.id,
+            title: post.title,
+            content: post.content,
+            author_id: post.author_id,
+            created_at: post.created_at.to_rfc3339(),
+            updated_at: post.updated_at.to_rfc3339(),
+        }),
+        Err(DomainError::PostNotFound) => HttpResponse::NotFound().body("Post not found"),
+        Err(DomainError::Forbidden) => HttpResponse::Forbidden().body("You are not the author"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Update error: {}", e)),
+    }
+}
+
+async fn delete_post(
+    blog_service: web::Data<Arc<BlogService>>,
+    req: HttpRequest,
+    path: web::Path<i64>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let user = req
+        .extensions()
+        .get::<AuthenticatedUser>()
+        .expect("AuthenticatedUser missing – middleware should guarantee this")
+        .clone();
+    match blog_service.delete_post(id, user.user_id).await {
+        Ok(_) => HttpResponse::NoContent().finish(),
+        Err(DomainError::PostNotFound) => HttpResponse::NotFound().body("Post not found"),
+        Err(DomainError::Forbidden) => HttpResponse::Forbidden().body("You are not the author"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Delete error: {}", e)),
+    }
+}
+
+async fn list_posts(
+    blog_service: web::Data<Arc<BlogService>>,
+    query: web::Query<ListQuery>,
+) -> impl Responder {
+    let limit = query.limit.unwrap_or(10);
+    let offset = query.offset.unwrap_or(0);
+    match blog_service.list_posts(limit, offset).await {
+        Ok((posts, total)) => {
+            let post_responses: Vec<PostResponse> = posts
+                .into_iter()
+                .map(|p| PostResponse {
+                    id: p.id,
+                    title: p.title,
+                    content: p.content,
+                    author_id: p.author_id,
+                    created_at: p.created_at.to_rfc3339(),
+                    updated_at: p.updated_at.to_rfc3339(),
+                })
+                .collect();
+            HttpResponse::Ok().json(ListPostsResponse {
+                posts: post_responses,
+                total,
+                limit,
+                offset,
+            })
+        }
+        Err(e) => HttpResponse::InternalServerError().body(format!("List error: {}", e)),
+    }
+}
+
+pub fn run_http_server(
+    auth_service: Arc<AuthService>,
+    blog_service: Arc<BlogService>,
+    jwt_service: Arc<crate::infrastructure::jwt::JwtService>,
+    port: u16,
+) -> std::io::Result<actix_web::dev::Server> {
+    let auth_service = web::Data::new(auth_service);
+    let blog_service = web::Data::new(blog_service);
+    let jwt_service = web::Data::new(jwt_service);
+
+    let server = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
+        App::new()
+            .wrap(cors)
+            .app_data(auth_service.clone())
+            .app_data(blog_service.clone())
+            .app_data(jwt_service.clone())
+            .service(
+                web::scope("/api/auth")
+                    .route("/register", web::post().to(register))
+                    .route("/login", web::post().to(login)),
+            )
+            .service(
+                web::scope("/api/posts")
+                    .route("", web::get().to(list_posts))
+                    .route("/{id}", web::get().to(get_post))
+                    .service(
+                        web::scope("")
+                            .wrap(HttpAuthentication::bearer(jwt_validator))
+                            .route("", web::post().to(create_post))
+                            .route("/{id}", web::put().to(update_post))
+                            .route("/{id}", web::delete().to(delete_post)),
+                    ),
+            )
+    })
+    .bind(("0.0.0.0", port))?
+    .run();
+    Ok(server)
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/presentation/mod.rs
+pub mod grpc_service;
+pub mod http_handlers;
+pub mod middleware;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/presentation/middleware.rs
+use crate::infrastructure::jwt::JwtService;
+use actix_web::{dev::ServiceRequest, error::ErrorUnauthorized, Error, HttpMessage};
+use actix_web_httpauth::extractors::bearer::BearerAuth;
+use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUser {
+    pub user_id: i64,
+}
+
+pub async fn jwt_validator(
+    req: ServiceRequest,
+    credentials: BearerAuth,
+) -> Result<ServiceRequest, (Error, ServiceRequest)> {
+    let jwt_service = match req.app_data::<actix_web::web::Data<Arc<JwtService>>>() {
+        Some(s) => s,
+        None => {
+            let err = ErrorUnauthorized("JWT service not configured");
+            return Err((err, req));
+        }
+    };
+    match jwt_service.verify_token(credentials.token()) {
+        Ok(claims) => {
+            let user = AuthenticatedUser {
+                user_id: claims.sub,
+            };
+            req.extensions_mut().insert(user);
+            Ok(req)
+        }
+        Err(_) => {
+            let err = ErrorUnauthorized("Invalid token");
+            Err((err, req))
+        }
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-server/src/presentation/grpc_service.rs
+use crate::application::{auth_service::AuthService, blog_service::BlogService};
+use crate::domain::{
+    error::DomainError, post::CreatePost, post::UpdatePost, user::LoginUser, user::RegisterUser,
+};
+use crate::infrastructure::jwt::JwtService;
+use std::sync::Arc;
+use tonic::{transport::Server, Request, Response, Status};
+
+pub mod blog {
+    tonic::include_proto!("blog");
+}
+
+use blog::{
+    blog_service_server::{BlogService as GrpcBlogService, BlogServiceServer},
+    AuthResponse, CreatePostRequest, DeletePostRequest, Empty, GetPostRequest, ListPostsRequest,
+    ListPostsResponse, LoginRequest, PostResponse, RegisterRequest, UpdatePostRequest, User,
+};
+
+pub struct BlogGrpcService {
+    auth_service: Arc<AuthService>,
+    blog_service: Arc<BlogService>,
+    jwt_service: Arc<JwtService>,
+}
+
+#[tonic::async_trait]
+impl GrpcBlogService for BlogGrpcService {
+    async fn register(
+        &self,
+        request: Request<RegisterRequest>,
+    ) -> Result<Response<AuthResponse>, Status> {
+        let req = request.into_inner();
+        let input = RegisterUser {
+            username: req.username,
+            email: req.email,
+            password: req.password,
+        };
+        match self.auth_service.register(input).await {
+            Ok((token, user)) => Ok(Response::new(AuthResponse {
+                token,
+                user: Some(User {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    created_at: user.created_at.to_rfc3339(),
+                }),
+            })),
+            Err(DomainError::UserAlreadyExists) => {
+                Err(Status::already_exists("User already exists"))
+            }
+            Err(e) => Err(Status::internal(format!("Registration error: {}", e))),
+        }
+    }
+
+    async fn login(
+        &self,
+        request: Request<LoginRequest>,
+    ) -> Result<Response<AuthResponse>, Status> {
+        let req = request.into_inner();
+        let input = LoginUser {
+            username: req.username,
+            password: req.password,
+        };
+        match self.auth_service.login(input).await {
+            Ok((token, user)) => Ok(Response::new(AuthResponse {
+                token,
+                user: Some(User {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    created_at: user.created_at.to_rfc3339(),
+                }),
+            })),
+            Err(DomainError::InvalidCredentials) => {
+                Err(Status::unauthenticated("Invalid credentials"))
+            }
+            Err(DomainError::UserNotFound) => Err(Status::not_found("User not found")),
+            Err(e) => Err(Status::internal(format!("Login error: {}", e))),
+        }
+    }
+
+    async fn create_post(
+        &self,
+        request: Request<CreatePostRequest>,
+    ) -> Result<Response<PostResponse>, Status> {
+        let user_id = self
+            .extract_user_id(&request)
+            .ok_or_else(|| Status::unauthenticated("Missing or invalid token"))?;
+        let req = request.into_inner();
+        let input = CreatePost {
+            title: req.title,
+            content: req.content,
+        };
+        match self.blog_service.create_post(user_id, input).await {
+            Ok(post) => Ok(Response::new(PostResponse {
+                id: post.id,
+                title: post.title,
+                content: post.content,
+                author_id: post.author_id,
+                created_at: post.created_at.to_rfc3339(),
+                updated_at: post.updated_at.to_rfc3339(),
+            })),
+            Err(DomainError::UserNotFound) => Err(Status::not_found("Author not found")),
+            Err(e) => Err(Status::internal(format!("Create post error: {}", e))),
+        }
+    }
+
+    async fn get_post(
+        &self,
+        request: Request<GetPostRequest>,
+    ) -> Result<Response<PostResponse>, Status> {
+        let id = request.into_inner().id;
+        match self.blog_service.get_post(id).await {
+            Ok(post) => Ok(Response::new(PostResponse {
+                id: post.id,
+                title: post.title,
+                content: post.content,
+                author_id: post.author_id,
+                created_at: post.created_at.to_rfc3339(),
+                updated_at: post.updated_at.to_rfc3339(),
+            })),
+            Err(DomainError::PostNotFound) => Err(Status::not_found("Post not found")),
+            Err(e) => Err(Status::internal(format!("Get post error: {}", e))),
+        }
+    }
+
+    async fn update_post(
+        &self,
+        request: Request<UpdatePostRequest>,
+    ) -> Result<Response<PostResponse>, Status> {
+        let user_id = self
+            .extract_user_id(&request)
+            .ok_or_else(|| Status::unauthenticated("Missing or invalid token"))?;
+        let req = request.into_inner();
+        let input = UpdatePost {
+            title: req.title,
+            content: req.content,
+        };
+        match self.blog_service.update_post(req.id, user_id, input).await {
+            Ok(post) => Ok(Response::new(PostResponse {
+                id: post.id,
+                title: post.title,
+                content: post.content,
+                author_id: post.author_id,
+                created_at: post.created_at.to_rfc3339(),
+                updated_at: post.updated_at.to_rfc3339(),
+            })),
+            Err(DomainError::PostNotFound) => Err(Status::not_found("Post not found")),
+            Err(DomainError::Forbidden) => Err(Status::permission_denied("Not the author")),
+            Err(e) => Err(Status::internal(format!("Update error: {}", e))),
+        }
+    }
+
+    async fn delete_post(
+        &self,
+        request: Request<DeletePostRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        let user_id = self
+            .extract_user_id(&request)
+            .ok_or_else(|| Status::unauthenticated("Missing or invalid token"))?;
+        let id = request.into_inner().id;
+        match self.blog_service.delete_post(id, user_id).await {
+            Ok(()) => Ok(Response::new(Empty {})),
+            Err(DomainError::PostNotFound) => Err(Status::not_found("Post not found")),
+            Err(DomainError::Forbidden) => Err(Status::permission_denied("Not the author")),
+            Err(e) => Err(Status::internal(format!("Delete error: {}", e))),
+        }
+    }
+
+    async fn list_posts(
+        &self,
+        request: Request<ListPostsRequest>,
+    ) -> Result<Response<ListPostsResponse>, Status> {
+        let req = request.into_inner();
+        let limit = req.limit;
+        let offset = req.offset;
+        match self.blog_service.list_posts(limit, offset).await {
+            Ok((posts, total)) => {
+                let grpc_posts = posts
+                    .into_iter()
+                    .map(|p| PostResponse {
+                        id: p.id,
+                        title: p.title,
+                        content: p.content,
+                        author_id: p.author_id,
+                        created_at: p.created_at.to_rfc3339(),
+                        updated_at: p.updated_at.to_rfc3339(),
+                    })
+                    .collect();
+                Ok(Response::new(ListPostsResponse {
+                    posts: grpc_posts,
+                    total: total as i32,
+                    limit,
+                    offset,
+                }))
+            }
+            Err(e) => Err(Status::internal(format!("List error: {}", e))),
+        }
+    }
+}
+
+impl BlogGrpcService {
+    pub fn new(
+        auth_service: Arc<AuthService>,
+        blog_service: Arc<BlogService>,
+        jwt_service: Arc<JwtService>,
+    ) -> Self {
+        Self {
+            auth_service,
+            blog_service,
+            jwt_service,
+        }
+    }
+
+    /// extract_user_id извлекает user_id из JWT-токена, переданного в gRPC метаданных.
+    /// Ожидается заголовок `authorization: Bearer <token>`.
+    /// Возвращает `Some(user_id)` или `None` при отсутствии/невалидности токена.
+    fn extract_user_id<T>(&self, request: &Request<T>) -> Option<i64> {
+        let metadata = request.metadata();
+        let auth_header = metadata.get("authorization")?;
+        let auth_str = auth_header.to_str().ok()?;
+        if !auth_str.starts_with("Bearer ") {
+            return None;
+        }
+        let token = &auth_str[7..];
+        let claims = self.jwt_service.verify_token(token).ok()?;
+        Some(claims.sub)
+    }
+}
+
+pub fn run_grpc_server(
+    auth_service: Arc<AuthService>,
+    blog_service: Arc<BlogService>,
+    jwt_service: Arc<JwtService>,
+    port: u16,
+) -> Result<
+    impl std::future::Future<Output = Result<(), tonic::transport::Error>>,
+    Box<dyn std::error::Error>,
+> {
+    let grpc_service = BlogGrpcService::new(auth_service, blog_service, jwt_service);
+    let addr = format!("0.0.0.0:{}", port).parse()?;
+    let server = async move {
+        Server::builder()
+            .add_service(BlogServiceServer::new(grpc_service))
+            .serve(addr)
+            .await
+    };
+    Ok(server)
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/Cargo.toml
+[package]
+name = "blog-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true }
+gloo-net = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/index.html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Blog WASM Frontend</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .error { color: red; }
+        .post { border: 1px solid #ccc; margin: 1em 0; padding: 1em; }
+        .auth-form, .post-form { margin: 1em 0; padding: 1em; border: 1px solid #ddd; }
+        input, textarea, button { margin: 0.5em; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>Blog</h1>
+        <div id="auth-status"></div>
+        <div id="auth-forms">
+            <div class="auth-form">
+                <h3>Register</h3>
+                <input id="reg-username" placeholder="Username">
+                <input id="reg-email" placeholder="Email">
+                <input id="reg-password" type="password" placeholder="Password">
+                <button id="reg-btn">Register</button>
+            </div>
+            <div class="auth-form">
+                <h3>Login</h3>
+                <input id="login-username" placeholder="Username">
+                <input id="login-password" type="password" placeholder="Password">
+                <button id="login-btn">Login</button>
+            </div>
+        </div>
+        <button id="logout-btn" style="display:none;">Logout</button>
+        <div id="post-form" class="post-form" style="display:none;">
+            <h3>New Post</h3>
+            <input id="post-title" placeholder="Title">
+            <textarea id="post-content" placeholder="Content"></textarea>
+            <button id="create-btn">Create Post</button>
+        </div>
+        <div id="posts-list"></div>
+    </div>
+    <script type="module">
+        import init, { BlogApp } from './pkg/blog_wasm.js';
+        async function run() {
+            await init();
+            const app = BlogApp.new("http://localhost:3000");
+            window.app = app; // for debugging
+
+            const regBtn = document.getElementById('reg-btn');
+            const loginBtn = document.getElementById('login-btn');
+            const logoutBtn = document.getElementById('logout-btn');
+            const createBtn = document.getElementById('create-btn');
+            const postFormDiv = document.getElementById('post-form');
+
+            function updateUI() {
+                const authed = app.is_authenticated();
+                document.getElementById('auth-forms').style.display = authed ? 'none' : 'block';
+                logoutBtn.style.display = authed ? 'inline' : 'none';
+                postFormDiv.style.display = authed ? 'block' : 'none';
+                if (authed) {
+                    document.getElementById('auth-status').innerText = `Logged in as ${app.get_username()}`;
+                } else {
+                    document.getElementById('auth-status').innerText = 'Not logged in';
+                }
+                loadPosts();
+            }
+
+            async function loadPosts() {
+                try {
+                    const posts = await app.load_posts();
+                    const container = document.getElementById('posts-list');
+                    container.innerHTML = '';
+                    for (let post of posts) {
+                        const isAuthor = app.is_authenticated() && post.author_id === app.get_user_id();
+                        const div = document.createElement('div');
+                        div.className = 'post';
+                        div.innerHTML = `
+                            <h3>${escapeHtml(post.title)}</h3>
+                            <p>${escapeHtml(post.content)}</p>
+                            <small>by user ${post.author_id} at ${post.created_at}</small>
+                            ${isAuthor ? `<button class="edit-btn" data-id="${post.id}">Edit</button>
+                                         <button class="delete-btn" data-id="${post.id}">Delete</button>` : ''}
+                        `;
+                        container.appendChild(div);
+                    }
+                    document.querySelectorAll('.edit-btn').forEach(btn => {
+                        btn.addEventListener('click', async (e) => {
+                            const id = parseInt(btn.dataset.id);
+                            const newTitle = prompt("New title");
+                            const newContent = prompt("New content");
+                            if (newTitle && newContent) {
+                                await app.update_post(id, newTitle, newContent);
+                                loadPosts();
+                            }
+                        });
+                    });
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', async (e) => {
+                            const id = parseInt(btn.dataset.id);
+                            if (confirm("Delete post?")) {
+                                await app.delete_post(id);
+                                loadPosts();
+                            }
+                        });
+                    });
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+
+            function escapeHtml(str) {
+                return str.replace(/[&<>]/g, function(m) {
+                    if (m === '&') return '&amp;';
+                    if (m === '<') return '&lt;';
+                    if (m === '>') return '&gt;';
+                    return m;
+                });
+            }
+
+            regBtn.onclick = async () => {
+                const username = document.getElementById('reg-username').value;
+                const email = document.getElementById('reg-email').value;
+                const password = document.getElementById('reg-password').value;
+                try {
+                    await app.register(username, email, password);
+                    updateUI();
+                } catch(e) {
+                    alert("Registration failed: " + e);
+                }
+            };
+            loginBtn.onclick = async () => {
+                const username = document.getElementById('login-username').value;
+                const password = document.getElementById('login-password').value;
+                try {
+                    await app.login(username, password);
+                    updateUI();
+                } catch(e) {
+                    alert("Login failed: " + e);
+                }
+            };
+            logoutBtn.onclick = () => {
+                app.logout();
+                updateUI();
+            };
+            createBtn.onclick = async () => {
+                const title = document.getElementById('post-title').value;
+                const content = document.getElementById('post-content').value;
+                if (title && content) {
+                    await app.create_post(title, content);
+                    document.getElementById('post-title').value = '';
+                    document.getElementById('post-content').value = '';
+                    loadPosts();
+                } else {
+                    alert("Title and content required");
+                }
+            };
+            updateUI();
+        }
+        run();
+    </script>
+</body>
+</html>
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/pkg/blog_wasm.d.ts
+/* tslint:disable */
+/* eslint-disable */
+
+export class BlogApp {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    create_post(title: string, content: string): Promise<void>;
+    delete_post(id: bigint): Promise<void>;
+    get_user_id(): bigint;
+    get_username(): string;
+    is_authenticated(): boolean;
+    load_posts(): Promise<any>;
+    login(username: string, password: string): Promise<void>;
+    logout(): void;
+    static new(base_url: string): BlogApp;
+    register(username: string, email: string, password: string): Promise<void>;
+    update_post(id: bigint, title: string, content: string): Promise<void>;
+}
+
+export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+    readonly __wbg_blogapp_free: (a: number, b: number) => void;
+    readonly blogapp_create_post: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly blogapp_delete_post: (a: number, b: bigint) => any;
+    readonly blogapp_get_user_id: (a: number) => bigint;
+    readonly blogapp_get_username: (a: number) => [number, number];
+    readonly blogapp_is_authenticated: (a: number) => number;
+    readonly blogapp_load_posts: (a: number) => any;
+    readonly blogapp_login: (a: number, b: number, c: number, d: number, e: number) => any;
+    readonly blogapp_logout: (a: number) => void;
+    readonly blogapp_new: (a: number, b: number) => number;
+    readonly blogapp_register: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => any;
+    readonly blogapp_update_post: (a: number, b: bigint, c: number, d: number, e: number, f: number) => any;
+    readonly wasm_bindgen__convert__closures_____invoke__hdb201fd011bd1f6c: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__h9850e9c714132942: (a: number, b: number, c: any, d: any) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_start: () => void;
+}
+
+export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+/**
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+/**
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/pkg/blog_wasm.js
+/* @ts-self-types="./blog_wasm.d.ts" */
+
+export class BlogApp {
+    static __wrap(ptr) {
+        const obj = Object.create(BlogApp.prototype);
+        obj.__wbg_ptr = ptr;
+        BlogAppFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        BlogAppFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_blogapp_free(ptr, 0);
+    }
+    /**
+     * @param {string} title
+     * @param {string} content
+     * @returns {Promise<void>}
+     */
+    create_post(title, content) {
+        const ptr0 = passStringToWasm0(title, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.blogapp_create_post(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return ret;
+    }
+    /**
+     * @param {bigint} id
+     * @returns {Promise<void>}
+     */
+    delete_post(id) {
+        const ret = wasm.blogapp_delete_post(this.__wbg_ptr, id);
+        return ret;
+    }
+    /**
+     * @returns {bigint}
+     */
+    get_user_id() {
+        const ret = wasm.blogapp_get_user_id(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    get_username() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.blogapp_get_username(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_authenticated() {
+        const ret = wasm.blogapp_is_authenticated(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {Promise<any>}
+     */
+    load_posts() {
+        const ret = wasm.blogapp_load_posts(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {string} username
+     * @param {string} password
+     * @returns {Promise<void>}
+     */
+    login(username, password) {
+        const ptr0 = passStringToWasm0(username, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(password, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.blogapp_login(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return ret;
+    }
+    logout() {
+        wasm.blogapp_logout(this.__wbg_ptr);
+    }
+    /**
+     * @param {string} base_url
+     * @returns {BlogApp}
+     */
+    static new(base_url) {
+        const ptr0 = passStringToWasm0(base_url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.blogapp_new(ptr0, len0);
+        return BlogApp.__wrap(ret);
+    }
+    /**
+     * @param {string} username
+     * @param {string} email
+     * @param {string} password
+     * @returns {Promise<void>}
+     */
+    register(username, email, password) {
+        const ptr0 = passStringToWasm0(username, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(email, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(password, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.blogapp_register(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        return ret;
+    }
+    /**
+     * @param {bigint} id
+     * @param {string} title
+     * @param {string} content
+     * @returns {Promise<void>}
+     */
+    update_post(id, title, content) {
+        const ptr0 = passStringToWasm0(title, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.blogapp_update_post(this.__wbg_ptr, id, ptr0, len0, ptr1, len1);
+        return ret;
+    }
+}
+if (Symbol.dispose) BlogApp.prototype[Symbol.dispose] = BlogApp.prototype.free;
+function __wbg_get_imports() {
+    const import0 = {
+        __proto__: null,
+        __wbg_Error_3639a60ed15f87e7: function(arg0, arg1) {
+            const ret = Error(getStringFromWasm0(arg0, arg1));
+            return ret;
+        },
+        __wbg_Number_a3d737fd183f7dca: function(arg0) {
+            const ret = Number(arg0);
+            return ret;
+        },
+        __wbg_String_8564e559799eccda: function(arg0, arg1) {
+            const ret = String(arg1);
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg___wbindgen_bigint_get_as_i64_3af6d4ca77193a4b: function(arg0, arg1) {
+            const v = arg1;
+            const ret = typeof(v) === 'bigint' ? v : undefined;
+            getDataViewMemory0().setBigInt64(arg0 + 8 * 1, isLikeNone(ret) ? BigInt(0) : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
+        __wbg___wbindgen_boolean_get_c3dd5c39f1b5a12b: function(arg0) {
+            const v = arg0;
+            const ret = typeof(v) === 'boolean' ? v : undefined;
+            return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
+        },
+        __wbg___wbindgen_debug_string_07cb72cfcc952e2b: function(arg0, arg1) {
+            const ret = debugString(arg1);
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg___wbindgen_in_2617fa76397620d3: function(arg0, arg1) {
+            const ret = arg0 in arg1;
+            return ret;
+        },
+        __wbg___wbindgen_is_bigint_d6a8167cac401b95: function(arg0) {
+            const ret = typeof(arg0) === 'bigint';
+            return ret;
+        },
+        __wbg___wbindgen_is_function_2f0fd7ceb86e64c5: function(arg0) {
+            const ret = typeof(arg0) === 'function';
+            return ret;
+        },
+        __wbg___wbindgen_is_object_5b22ff2418063a9c: function(arg0) {
+            const val = arg0;
+            const ret = typeof(val) === 'object' && val !== null;
+            return ret;
+        },
+        __wbg___wbindgen_is_undefined_244a92c34d3b6ec0: function(arg0) {
+            const ret = arg0 === undefined;
+            return ret;
+        },
+        __wbg___wbindgen_jsval_eq_403eaa3610500a25: function(arg0, arg1) {
+            const ret = arg0 === arg1;
+            return ret;
+        },
+        __wbg___wbindgen_jsval_loose_eq_1978f1e77b4bce62: function(arg0, arg1) {
+            const ret = arg0 == arg1;
+            return ret;
+        },
+        __wbg___wbindgen_number_get_dd6d69a6079f26f1: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
+        __wbg___wbindgen_string_get_965592073e5d848c: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg___wbindgen_throw_9c75d47bf9e7731e: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg__wbg_cb_unref_158e43e869788cdc: function(arg0) {
+            arg0._wbg_cb_unref();
+        },
+        __wbg_call_a41d6421b30a32c5: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.call(arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbg_call_add9e5a76382e668: function() { return handleError(function (arg0, arg1) {
+            const ret = arg0.call(arg1);
+            return ret;
+        }, arguments); },
+        __wbg_done_b1afd6201ac045e0: function(arg0) {
+            const ret = arg0.done;
+            return ret;
+        },
+        __wbg_fetch_f36631298df17a02: function(arg0, arg1) {
+            const ret = arg0.fetch(arg1);
+            return ret;
+        },
+        __wbg_getItem_f68808a9230dd173: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg1.getItem(getStringFromWasm0(arg2, arg3));
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        }, arguments); },
+        __wbg_get_9cfea9b7bbf12a15: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.get(arg0, arg1);
+            return ret;
+        }, arguments); },
+        __wbg_get_unchecked_be562b1421656321: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
+            return ret;
+        },
+        __wbg_get_with_ref_key_6412cf3094599694: function(arg0, arg1) {
+            const ret = arg0[arg1];
+            return ret;
+        },
+        __wbg_instanceof_ArrayBuffer_eab9f28fbec23477: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof ArrayBuffer;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_Response_370b83aa6c17e88a: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof Response;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_Uint8Array_57d77acd50e4c44d: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof Uint8Array;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_Window_4153c1818a1c0c0b: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof Window;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_isArray_c6c6ef8308995bcf: function(arg0) {
+            const ret = Array.isArray(arg0);
+            return ret;
+        },
+        __wbg_isSafeInteger_3c56c421a5b4cce4: function(arg0) {
+            const ret = Number.isSafeInteger(arg0);
+            return ret;
+        },
+        __wbg_iterator_9d68985a1d096fc2: function() {
+            const ret = Symbol.iterator;
+            return ret;
+        },
+        __wbg_json_2b0cb41c2aecf3f4: function() { return handleError(function (arg0) {
+            const ret = arg0.json();
+            return ret;
+        }, arguments); },
+        __wbg_length_0a6ce016dc1460b0: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
+        __wbg_length_ba3c032602efe310: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
+        __wbg_localStorage_11b5275c3ad2bab7: function() { return handleError(function (arg0) {
+            const ret = arg0.localStorage;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        }, arguments); },
+        __wbg_new_18865c63fa645c6f: function() { return handleError(function () {
+            const ret = new Headers();
+            return ret;
+        }, arguments); },
+        __wbg_new_2fad8ca02fd00684: function() {
+            const ret = new Object();
+            return ret;
+        },
+        __wbg_new_3baa8d9866155c79: function() {
+            const ret = new Array();
+            return ret;
+        },
+        __wbg_new_8454eee672b2ba6e: function(arg0) {
+            const ret = new Uint8Array(arg0);
+            return ret;
+        },
+        __wbg_new_typed_1137602701dc87d4: function(arg0, arg1) {
+            try {
+                var state0 = {a: arg0, b: arg1};
+                var cb0 = (arg0, arg1) => {
+                    const a = state0.a;
+                    state0.a = 0;
+                    try {
+                        return wasm_bindgen__convert__closures_____invoke__h9850e9c714132942(a, state0.b, arg0, arg1);
+                    } finally {
+                        state0.a = a;
+                    }
+                };
+                const ret = new Promise(cb0);
+                return ret;
+            } finally {
+                state0.a = 0;
+            }
+        },
+        __wbg_new_with_str_and_init_da311e12114f4d1e: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = new Request(getStringFromWasm0(arg0, arg1), arg2);
+            return ret;
+        }, arguments); },
+        __wbg_next_261c3c48c6e309a5: function(arg0) {
+            const ret = arg0.next;
+            return ret;
+        },
+        __wbg_next_aacee310bcfe6461: function() { return handleError(function (arg0) {
+            const ret = arg0.next();
+            return ret;
+        }, arguments); },
+        __wbg_ok_b6a9978bb5f66f33: function(arg0) {
+            const ret = arg0.ok;
+            return ret;
+        },
+        __wbg_prototypesetcall_fd4050e806e1d519: function(arg0, arg1, arg2) {
+            Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+        },
+        __wbg_queueMicrotask_40ac6ffc2848ba77: function(arg0) {
+            queueMicrotask(arg0);
+        },
+        __wbg_queueMicrotask_74d092439f6494c1: function(arg0) {
+            const ret = arg0.queueMicrotask;
+            return ret;
+        },
+        __wbg_removeItem_a5faee82be5c6ed1: function() { return handleError(function (arg0, arg1, arg2) {
+            arg0.removeItem(getStringFromWasm0(arg1, arg2));
+        }, arguments); },
+        __wbg_resolve_9feb5d906ca62419: function(arg0) {
+            const ret = Promise.resolve(arg0);
+            return ret;
+        },
+        __wbg_setItem_bb1a692eb19d66d0: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+            arg0.setItem(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+        }, arguments); },
+        __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
+            arg0[arg1] = arg2;
+        },
+        __wbg_set_959f043b9152efeb: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+            arg0.set(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+        }, arguments); },
+        __wbg_set_body_aaff4f5f9991f342: function(arg0, arg1) {
+            arg0.body = arg1;
+        },
+        __wbg_set_f614f6a0608d1d1d: function(arg0, arg1, arg2) {
+            arg0[arg1 >>> 0] = arg2;
+        },
+        __wbg_set_headers_ae96049ea40e9eef: function(arg0, arg1) {
+            arg0.headers = arg1;
+        },
+        __wbg_set_method_0eea8a5597775fa1: function(arg0, arg1, arg2) {
+            arg0.method = getStringFromWasm0(arg1, arg2);
+        },
+        __wbg_static_accessor_GLOBAL_THIS_1c7f1bd6c6941fdb: function() {
+            const ret = typeof globalThis === 'undefined' ? null : globalThis;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_static_accessor_GLOBAL_e039bc914f83e74e: function() {
+            const ret = typeof global === 'undefined' ? null : global;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_static_accessor_SELF_8bf8c48c28420ad5: function() {
+            const ret = typeof self === 'undefined' ? null : self;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_static_accessor_WINDOW_6aeee9b51652ee0f: function() {
+            const ret = typeof window === 'undefined' ? null : window;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_status_157e67ab07d01f8a: function(arg0) {
+            const ret = arg0.status;
+            return ret;
+        },
+        __wbg_then_20a157d939b514f5: function(arg0, arg1) {
+            const ret = arg0.then(arg1);
+            return ret;
+        },
+        __wbg_then_5ef9b762bc91555c: function(arg0, arg1, arg2) {
+            const ret = arg0.then(arg1, arg2);
+            return ret;
+        },
+        __wbg_value_f852716acdeb3e82: function(arg0) {
+            const ret = arg0.value;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000001: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 65, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hdb201fd011bd1f6c);
+            return ret;
+        },
+        __wbindgen_cast_0000000000000002: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0) {
+            // Cast intrinsic for `I64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000004: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
+        },
+        __wbindgen_init_externref_table: function() {
+            const table = wasm.__wbindgen_externrefs;
+            const offset = table.grow(4);
+            table.set(0, undefined);
+            table.set(offset + 0, undefined);
+            table.set(offset + 1, null);
+            table.set(offset + 2, true);
+            table.set(offset + 3, false);
+        },
+    };
+    return {
+        __proto__: null,
+        "./blog_wasm_bg.js": import0,
+    };
+}
+
+function wasm_bindgen__convert__closures_____invoke__hdb201fd011bd1f6c(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__hdb201fd011bd1f6c(arg0, arg1, arg2);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+function wasm_bindgen__convert__closures_____invoke__h9850e9c714132942(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h9850e9c714132942(arg0, arg1, arg2, arg3);
+}
+
+const BlogAppFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_blogapp_free(ptr, 1));
+
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_externrefs.set(idx, obj);
+    return idx;
+}
+
+const CLOSURE_DTORS = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(state => wasm.__wbindgen_destroy_closure(state.a, state.b));
+
+function debugString(val) {
+    // primitive types
+    const type = typeof val;
+    if (type == 'number' || type == 'boolean' || val == null) {
+        return  `${val}`;
+    }
+    if (type == 'string') {
+        return `"${val}"`;
+    }
+    if (type == 'symbol') {
+        const description = val.description;
+        if (description == null) {
+            return 'Symbol';
+        } else {
+            return `Symbol(${description})`;
+        }
+    }
+    if (type == 'function') {
+        const name = val.name;
+        if (typeof name == 'string' && name.length > 0) {
+            return `Function(${name})`;
+        } else {
+            return 'Function';
+        }
+    }
+    // objects
+    if (Array.isArray(val)) {
+        const length = val.length;
+        let debug = '[';
+        if (length > 0) {
+            debug += debugString(val[0]);
+        }
+        for(let i = 1; i < length; i++) {
+            debug += ', ' + debugString(val[i]);
+        }
+        debug += ']';
+        return debug;
+    }
+    // Test for built-in
+    const builtInMatches = /\[object ([^\]]+)\]/.exec(toString.call(val));
+    let className;
+    if (builtInMatches && builtInMatches.length > 1) {
+        className = builtInMatches[1];
+    } else {
+        // Failed to match the standard '[object ClassName]'
+        return toString.call(val);
+    }
+    if (className == 'Object') {
+        // we're a user defined class or Object
+        // JSON.stringify avoids problems with cycles, and is generally much
+        // easier than looping through ownProperties of `val`.
+        try {
+            return 'Object(' + JSON.stringify(val) + ')';
+        } catch (_) {
+            return 'Object';
+        }
+    }
+    // errors
+    if (val instanceof Error) {
+        return `${val.name}: ${val.message}\n${val.stack}`;
+    }
+    // TODO we could test for more things here, like `Set`s and `Map`s.
+    return className;
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
+}
+
+function getStringFromWasm0(ptr, len) {
+    return decodeText(ptr >>> 0, len);
+}
+
+let cachedUint8ArrayMemory0 = null;
+function getUint8ArrayMemory0() {
+    if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
+        cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
+    }
+    return cachedUint8ArrayMemory0;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
+
+function makeMutClosure(arg0, arg1, f) {
+    const state = { a: arg0, b: arg1, cnt: 1 };
+    const real = (...args) => {
+
+        // First up with a closure we increment the internal reference
+        // count. This ensures that the Rust closure environment won't
+        // be deallocated while we're invoking it.
+        state.cnt++;
+        const a = state.a;
+        state.a = 0;
+        try {
+            return f(a, state.b, ...args);
+        } finally {
+            state.a = a;
+            real._wbg_cb_unref();
+        }
+    };
+    real._wbg_cb_unref = () => {
+        if (--state.cnt === 0) {
+            wasm.__wbindgen_destroy_closure(state.a, state.b);
+            state.a = 0;
+            CLOSURE_DTORS.unregister(state);
+        }
+    };
+    CLOSURE_DTORS.register(real, state, state);
+    return real;
+}
+
+function passStringToWasm0(arg, malloc, realloc) {
+    if (realloc === undefined) {
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = malloc(buf.length, 1) >>> 0;
+        getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    }
+
+    let len = arg.length;
+    let ptr = malloc(len, 1) >>> 0;
+
+    const mem = getUint8ArrayMemory0();
+
+    let offset = 0;
+
+    for (; offset < len; offset++) {
+        const code = arg.charCodeAt(offset);
+        if (code > 0x7F) break;
+        mem[ptr + offset] = code;
+    }
+    if (offset !== len) {
+        if (offset !== 0) {
+            arg = arg.slice(offset);
+        }
+        ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+        const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+        const ret = cachedTextEncoder.encodeInto(arg, view);
+
+        offset += ret.written;
+        ptr = realloc(ptr, len, offset, 1) >>> 0;
+    }
+
+    WASM_VECTOR_LEN = offset;
+    return ptr;
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_externrefs.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+}
+
+let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+cachedTextDecoder.decode();
+const MAX_SAFARI_DECODE_BYTES = 2146435072;
+let numBytesDecoded = 0;
+function decodeText(ptr, len) {
+    numBytesDecoded += len;
+    if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
+        cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+        cachedTextDecoder.decode();
+        numBytesDecoded = len;
+    }
+    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+}
+
+const cachedTextEncoder = new TextEncoder();
+
+if (!('encodeInto' in cachedTextEncoder)) {
+    cachedTextEncoder.encodeInto = function (arg, view) {
+        const buf = cachedTextEncoder.encode(arg);
+        view.set(buf);
+        return {
+            read: arg.length,
+            written: buf.length
+        };
+    };
+}
+
+let WASM_VECTOR_LEN = 0;
+
+let wasmModule, wasmInstance, wasm;
+function __wbg_finalize_init(instance, module) {
+    wasmInstance = instance;
+    wasm = instance.exports;
+    wasmModule = module;
+    cachedDataViewMemory0 = null;
+    cachedUint8ArrayMemory0 = null;
+    wasm.__wbindgen_start();
+    return wasm;
+}
+
+async function __wbg_load(module, imports) {
+    if (typeof Response === 'function' && module instanceof Response) {
+        if (typeof WebAssembly.instantiateStreaming === 'function') {
+            try {
+                return await WebAssembly.instantiateStreaming(module, imports);
+            } catch (e) {
+                const validResponse = module.ok && expectedResponseType(module.type);
+
+                if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
+                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+
+                } else { throw e; }
+            }
+        }
+
+        const bytes = await module.arrayBuffer();
+        return await WebAssembly.instantiate(bytes, imports);
+    } else {
+        const instance = await WebAssembly.instantiate(module, imports);
+
+        if (instance instanceof WebAssembly.Instance) {
+            return { instance, module };
+        } else {
+            return instance;
+        }
+    }
+
+    function expectedResponseType(type) {
+        switch (type) {
+            case 'basic': case 'cors': case 'default': return true;
+        }
+        return false;
+    }
+}
+
+function initSync(module) {
+    if (wasm !== undefined) return wasm;
+
+
+    if (module !== undefined) {
+        if (Object.getPrototypeOf(module) === Object.prototype) {
+            ({module} = module)
+        } else {
+            console.warn('using deprecated parameters for `initSync()`; pass a single object instead')
+        }
+    }
+
+    const imports = __wbg_get_imports();
+    if (!(module instanceof WebAssembly.Module)) {
+        module = new WebAssembly.Module(module);
+    }
+    const instance = new WebAssembly.Instance(module, imports);
+    return __wbg_finalize_init(instance, module);
+}
+
+async function __wbg_init(module_or_path) {
+    if (wasm !== undefined) return wasm;
+
+
+    if (module_or_path !== undefined) {
+        if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
+            ({module_or_path} = module_or_path)
+        } else {
+            console.warn('using deprecated parameters for the initialization function; pass a single object instead')
+        }
+    }
+
+    if (module_or_path === undefined) {
+        module_or_path = new URL('blog_wasm_bg.wasm', import.meta.url);
+    }
+    const imports = __wbg_get_imports();
+
+    if (typeof module_or_path === 'string' || (typeof Request === 'function' && module_or_path instanceof Request) || (typeof URL === 'function' && module_or_path instanceof URL)) {
+        module_or_path = fetch(module_or_path);
+    }
+
+    const { instance, module } = await __wbg_load(await module_or_path, imports);
+
+    return __wbg_finalize_init(instance, module);
+}
+
+export { initSync, __wbg_init as default };
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/pkg/.gitignore
+*
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/pkg/package.json
+{
+  "name": "blog-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "blog_wasm_bg.wasm",
+    "blog_wasm.js",
+    "blog_wasm.d.ts"
+  ],
+  "main": "blog_wasm.js",
+  "types": "blog_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/pkg/blog_wasm_bg.wasm.d.ts
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_blogapp_free: (a: number, b: number) => void;
+export const blogapp_create_post: (a: number, b: number, c: number, d: number, e: number) => any;
+export const blogapp_delete_post: (a: number, b: bigint) => any;
+export const blogapp_get_user_id: (a: number) => bigint;
+export const blogapp_get_username: (a: number) => [number, number];
+export const blogapp_is_authenticated: (a: number) => number;
+export const blogapp_load_posts: (a: number) => any;
+export const blogapp_login: (a: number, b: number, c: number, d: number, e: number) => any;
+export const blogapp_logout: (a: number) => void;
+export const blogapp_new: (a: number, b: number) => number;
+export const blogapp_register: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => any;
+export const blogapp_update_post: (a: number, b: bigint, c: number, d: number, e: number, f: number) => any;
+export const wasm_bindgen__convert__closures_____invoke__hdb201fd011bd1f6c: (a: number, b: number, c: any) => [number, number];
+export const wasm_bindgen__convert__closures_____invoke__h9850e9c714132942: (a: number, b: number, c: any, d: any) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_destroy_closure: (a: number, b: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_start: () => void;
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-wasm/src/lib.rs
+use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen::to_value;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{window, Headers, Request, RequestInit, Response};
+
+#[derive(Serialize, Deserialize, Clone)]
+struct User {
+    id: i64,
+    username: String,
+    email: String,
+    created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AuthResponse {
+    token: String,
+    user: User,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Post {
+    id: i64,
+    title: String,
+    content: String,
+    author_id: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[wasm_bindgen]
+pub struct BlogApp {
+    base_url: String,
+    token: Option<String>,
+    username: Option<String>,
+    user_id: Option<i64>,
+}
+
+#[wasm_bindgen]
+impl BlogApp {
+    pub fn new(base_url: String) -> BlogApp {
+        let token = Self::load_token_from_storage();
+        let username = Self::load_username_from_storage();
+        let user_id = Self::load_user_id_from_storage();
+        BlogApp {
+            base_url,
+            token,
+            username,
+            user_id,
+        }
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.token.is_some()
+    }
+
+    pub fn get_username(&self) -> String {
+        self.username.clone().unwrap_or_default()
+    }
+
+    pub fn get_user_id(&self) -> i64 {
+        self.user_id.unwrap_or(0)
+    }
+
+    fn save_token(&mut self, token: String, username: String, user_id: i64) {
+        self.token = Some(token.clone());
+        self.username = Some(username.clone());
+        self.user_id = Some(user_id);
+        Self::save_token_to_storage(&token);
+        Self::save_username_to_storage(&username);
+        Self::save_user_id_to_storage(user_id);
+    }
+
+    pub fn logout(&mut self) {
+        self.token = None;
+        self.username = None;
+        self.user_id = None;
+        Self::clear_storage();
+    }
+
+    fn save_token_to_storage(token: &str) {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                let _ = local.set_item("blog_token", token);
+            }
+        }
+    }
+
+    fn load_token_from_storage() -> Option<String> {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                return local.get_item("blog_token").ok().flatten();
+            }
+        }
+        None
+    }
+
+    fn save_username_to_storage(username: &str) {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                let _ = local.set_item("blog_username", username);
+            }
+        }
+    }
+
+    fn load_username_from_storage() -> Option<String> {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                return local.get_item("blog_username").ok().flatten();
+            }
+        }
+        None
+    }
+
+    fn save_user_id_to_storage(user_id: i64) {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                let _ = local.set_item("blog_user_id", &user_id.to_string());
+            }
+        }
+    }
+
+    fn load_user_id_from_storage() -> Option<i64> {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                if let Ok(Some(val)) = local.get_item("blog_user_id") {
+                    return val.parse().ok();
+                }
+            }
+        }
+        None
+    }
+
+    fn clear_storage() {
+        if let Some(win) = window() {
+            if let Ok(Some(local)) = win.local_storage() {
+                let _ = local.remove_item("blog_token");
+                let _ = local.remove_item("blog_username");
+                let _ = local.remove_item("blog_user_id");
+            }
+        }
+    }
+
+    /// request выполняет HTTP-запрос к серверу.
+    /// - `method`: HTTP метод (GET, POST, PUT, DELETE).
+    /// - `path`: путь относительно base_url.
+    /// - `body`: опциональное тело запроса (сериализуется в JSON).
+    /// Return:
+    /// - `JsValue` с распарсенным JSON-ответом или ошибку.
+    async fn request<T: Serialize + ?Sized>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&T>,
+    ) -> Result<JsValue, JsValue> {
+        let url = format!("{}{}", self.base_url, path);
+        let headers = Headers::new().map_err(|_| "Failed to create headers")?;
+        headers
+            .set("Content-Type", "application/json")
+            .map_err(|_| "Failed to set header")?;
+        if let Some(token) = &self.token {
+            let auth = format!("Bearer {}", token);
+            headers
+                .set("Authorization", &auth)
+                .map_err(|_| "Failed to set auth header")?;
+        }
+        let init = RequestInit::new();
+        init.set_method(method);
+        init.set_headers(&headers);
+        if let Some(b) = body {
+            let body_str = serde_json::to_string(b).map_err(|e| e.to_string())?;
+            let body_js = JsValue::from_str(&body_str);
+            init.set_body(&body_js);
+        }
+        let request =
+            Request::new_with_str_and_init(&url, &init).map_err(|_| "Failed to create request")?;
+        let window = window().ok_or("No window")?;
+        let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+        let resp: Response = resp_value.dyn_into().map_err(|_| "Invalid response")?;
+        if !resp.ok() {
+            return Err(JsValue::from_str(&format!("HTTP error {}", resp.status())));
+        }
+        let json = JsFuture::from(resp.json().map_err(|_| "Failed to get JSON")?).await?;
+        Ok(json)
+    }
+
+    #[wasm_bindgen]
+    pub async fn register(
+        &mut self,
+        username: String,
+        email: String,
+        password: String,
+    ) -> Result<(), JsValue> {
+        let body =
+            serde_json::json!({ "username": username, "email": email, "password": password });
+        let json = self
+            .request("POST", "/api/auth/register", Some(&body))
+            .await?;
+        let auth_resp: AuthResponse =
+            serde_wasm_bindgen::from_value(json).map_err(|e| e.to_string())?;
+        self.save_token(auth_resp.token, auth_resp.user.username, auth_resp.user.id);
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub async fn login(&mut self, username: String, password: String) -> Result<(), JsValue> {
+        let body = serde_json::json!({ "username": username, "password": password });
+        let json = self.request("POST", "/api/auth/login", Some(&body)).await?;
+        let auth_resp: AuthResponse =
+            serde_wasm_bindgen::from_value(json).map_err(|e| e.to_string())?;
+        self.save_token(auth_resp.token, auth_resp.user.username, auth_resp.user.id);
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub async fn create_post(&self, title: String, content: String) -> Result<(), JsValue> {
+        let body = serde_json::json!({ "title": title, "content": content });
+        self.request("POST", "/api/posts", Some(&body)).await?;
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub async fn load_posts(&self) -> Result<JsValue, JsValue> {
+        let json = self
+            .request(
+                "GET",
+                "/api/posts?limit=100&offset=0",
+                None as Option<&serde_json::Value>,
+            )
+            .await?;
+        #[derive(Deserialize)]
+        struct ListResp {
+            posts: Vec<Post>,
+        }
+        let list: ListResp = serde_wasm_bindgen::from_value(json).map_err(|e| e.to_string())?;
+        to_value(&list.posts).map_err(|e| e.to_string().into())
+    }
+
+    #[wasm_bindgen]
+    pub async fn update_post(
+        &self,
+        id: i64,
+        title: String,
+        content: String,
+    ) -> Result<(), JsValue> {
+        let body = serde_json::json!({ "title": title, "content": content });
+        self.request("PUT", &format!("/api/posts/{}", id), Some(&body))
+            .await?;
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub async fn delete_post(&self, id: i64) -> Result<(), JsValue> {
+        self.request(
+            "DELETE",
+            &format!("/api/posts/{}", id),
+            None as Option<&serde_json::Value>,
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-cli/Cargo.toml
+[package]
+name = "blog-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blog-client = { path = "../blog-client" }
+tokio = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+
+# /Users/laztrex/RustProjects/blog-project/blog-cli/src/main.rs
+use blog_client::{BlogClient, BlogClientError, Transport};
+use clap::{Parser, Subcommand};
+use std::fs;
+
+const TOKEN_FILE: &str = ".blog_token";
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg(short, long)]
+    grpc: bool,
+
+    #[arg(short, long)]
+    server: Option<String>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Register {
+        username: String,
+        email: String,
+        password: String,
+    },
+    Login {
+        username: String,
+        password: String,
+    },
+    Create {
+        title: String,
+        content: String,
+    },
+    Get {
+        id: i64,
+    },
+    Update {
+        id: i64,
+        title: String,
+        content: String,
+    },
+    Delete {
+        id: i64,
+    },
+    List {
+        #[arg(default_value_t = 10)]
+        limit: i32,
+        #[arg(default_value_t = 0)]
+        offset: i32,
+    },
+}
+
+/// save_token сохраняет JWT-токен в файл .blog_token в домашней директории.
+fn save_token(token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(TOKEN_FILE);
+    fs::write(path, token)?;
+    Ok(())
+}
+
+/// load_token загружает токен из файла .blog_token, если он существует.
+fn load_token() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let path = home.join(TOKEN_FILE);
+    fs::read_to_string(path).ok()
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv().ok();
+    let cli = Cli::parse();
+
+    let transport = if cli.grpc {
+        let addr = cli
+            .server
+            .unwrap_or_else(|| "http://localhost:50051".into());
+        Transport::Grpc(addr)
+    } else {
+        let base = cli.server.unwrap_or_else(|| "http://localhost:3000".into());
+        Transport::Http(Some(base))
+    };
+
+    let mut client = BlogClient::new(transport).await?;
+    if let Some(token) = load_token() {
+        client.set_token(token);
+    }
+
+    match cli.command {
+        Commands::Register {
+            username,
+            email,
+            password,
+        } => {
+            let resp = client.register(username, email, password).await?;
+            save_token(&resp.token)?;
+            println!(
+                "Registration successful! Logged in as {}",
+                resp.user.username
+            );
+        }
+        Commands::Login { username, password } => {
+            let resp = client.login(username, password).await?;
+            save_token(&resp.token)?;
+            println!("Login successful! Welcome {}", resp.user.username);
+        }
+        Commands::Create { title, content } => {
+            let post = client.create_post(title, content).await?;
+            println!("Post created with id: {}", post.id);
+        }
+        Commands::Get { id } => match client.get_post(id).await {
+            Ok(post) => {
+                println!("Title: {}", post.title);
+                println!("Content: {}", post.content);
+                println!("Author: {}", post.author_id);
+                println!("Created: {}", post.created_at);
+            }
+            Err(BlogClientError::NotFound(msg)) => eprintln!("{}", msg),
+            Err(e) => return Err(e.into()),
+        },
+        Commands::Update { id, title, content } => {
+            let post = client.update_post(id, title, content).await?;
+            println!("Post {} updated: {}", post.id, post.title);
+        }
+        Commands::Delete { id } => {
+            client.delete_post(id).await?;
+            println!("Post {} deleted", id);
+        }
+        Commands::List { limit, offset } => {
+            let (posts, total) = client.list_posts(limit, offset).await?;
+            println!("Posts (total {}):", total);
+            for post in posts {
+                println!("{}: {} (by user {})", post.id, post.title, post.author_id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/Cargo.toml
+[package]
+name = "blog-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+reqwest = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/build.rs
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=proto/blog.proto");
+    tonic_build::configure()
+        .build_client(true)
+        .build_server(false)
+        .compile_protos(&["proto/blog.proto"], &["proto"])?;
+    Ok(())
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/proto/blog.proto
+syntax = "proto3";
+
+package blog;
+
+service BlogService {
+    // Аутентификация
+    rpc Register(RegisterRequest) returns (AuthResponse);
+    rpc Login(LoginRequest) returns (AuthResponse);
+    
+    // CRUD постов
+    rpc CreatePost(CreatePostRequest) returns (PostResponse);
+    rpc GetPost(GetPostRequest) returns (PostResponse);
+    rpc UpdatePost(UpdatePostRequest) returns (PostResponse);
+    rpc DeletePost(DeletePostRequest) returns (Empty);
+    rpc ListPosts(ListPostsRequest) returns (ListPostsResponse);
+}
+
+message RegisterRequest {
+    string username = 1;
+    string email = 2;
+    string password = 3;
+}
+
+message LoginRequest {
+    string username = 1;
+    string password = 2;
+}
+
+message AuthResponse {
+    string token = 1;
+    User user = 2;
+}
+
+message User {
+    int64 id = 1;
+    string username = 2;
+    string email = 3;
+    string created_at = 4;
+}
+
+message CreatePostRequest {
+    string title = 1;
+    string content = 2;
+}
+
+message GetPostRequest {
+    int64 id = 1;
+}
+
+message UpdatePostRequest {
+    int64 id = 1;
+    string title = 2;
+    string content = 3;
+}
+
+message DeletePostRequest {
+    int64 id = 1;
+}
+
+message PostResponse {
+    int64 id = 1;
+    string title = 2;
+    string content = 3;
+    int64 author_id = 4;
+    string created_at = 5;
+    string updated_at = 6;
+}
+
+message ListPostsRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message ListPostsResponse {
+    repeated PostResponse posts = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message Empty {}
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/src/grpc_client.rs
+use crate::error::BlogClientError;
+
+use std::time::Duration;
+
+use tonic::metadata::MetadataValue;
+use tonic::Request;
+
+tonic::include_proto!("blog");
+
+const GRPC_TIMEOUT_SECS: u64 = 30;
+
+pub struct GrpcClient {
+    client: blog_service_client::BlogServiceClient<tonic::transport::Channel>,
+    token: Option<String>,
+}
+
+impl GrpcClient {
+    /// new создаёт нового gRPC-клиента, подключается к серверу с таймаутом.
+    pub async fn new(addr: String) -> Result<Self, BlogClientError> {
+        let channel = tonic::transport::Channel::from_shared(addr)
+            .map_err(|e| BlogClientError::Other(e.to_string()))?
+            .timeout(Duration::from_secs(GRPC_TIMEOUT_SECS))
+            .connect()
+            .await
+            .map_err(BlogClientError::GrpcTransport)?;
+        let client = blog_service_client::BlogServiceClient::new(channel);
+        Ok(Self {
+            client,
+            token: None,
+        })
+    }
+
+    pub fn set_token(&mut self, token: String) {
+        self.token = Some(token);
+    }
+
+    pub fn get_token(&self) -> Option<&String> {
+        self.token.as_ref()
+    }
+
+    /// add_auth добавляет JWT-токен в метаданные gRPC-запроса, если он установлен.
+    fn add_auth<T>(&self, mut req: Request<T>) -> Request<T> {
+        if let Some(token) = &self.token {
+            let bearer = format!("Bearer {}", token);
+            if let Ok(val) = MetadataValue::try_from(&bearer) {
+                req.metadata_mut().insert("authorization", val);
+            }
+        }
+        req
+    }
+
+    pub async fn register(
+        &mut self,
+        username: String,
+        email: String,
+        password: String,
+    ) -> Result<(String, User), BlogClientError> {
+        let req = RegisterRequest {
+            username,
+            email,
+            password,
+        };
+        let resp = self.client.register(req).await?.into_inner();
+        self.token = Some(resp.token.clone());
+        Ok((resp.token, resp.user.unwrap()))
+    }
+
+    pub async fn login(
+        &mut self,
+        username: String,
+        password: String,
+    ) -> Result<(String, User), BlogClientError> {
+        let req = LoginRequest { username, password };
+        let resp = self.client.login(req).await?.into_inner();
+        self.token = Some(resp.token.clone());
+        Ok((resp.token, resp.user.unwrap()))
+    }
+
+    pub async fn create_post(
+        &mut self,
+        title: String,
+        content: String,
+    ) -> Result<PostResponse, BlogClientError> {
+        let req = CreatePostRequest { title, content };
+        let req = self.add_auth(Request::new(req));
+        let resp = self.client.create_post(req).await?.into_inner();
+        Ok(resp)
+    }
+
+    pub async fn get_post(&mut self, id: i64) -> Result<PostResponse, BlogClientError> {
+        let req = GetPostRequest { id };
+        let resp = self.client.get_post(req).await?.into_inner();
+        Ok(resp)
+    }
+
+    pub async fn update_post(
+        &mut self,
+        id: i64,
+        title: String,
+        content: String,
+    ) -> Result<PostResponse, BlogClientError> {
+        let req = UpdatePostRequest { id, title, content };
+        let req = self.add_auth(Request::new(req));
+        let resp = self.client.update_post(req).await?.into_inner();
+        Ok(resp)
+    }
+
+    pub async fn delete_post(&mut self, id: i64) -> Result<(), BlogClientError> {
+        let req = DeletePostRequest { id };
+        let req = self.add_auth(Request::new(req));
+        self.client.delete_post(req).await?;
+        Ok(())
+    }
+
+    pub async fn list_posts(
+        &mut self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<(Vec<PostResponse>, i32), BlogClientError> {
+        let req = ListPostsRequest { limit, offset };
+        let resp = self.client.list_posts(req).await?.into_inner();
+        Ok((resp.posts, resp.total))
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/src/error.rs
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum BlogClientError {
+    #[error("HTTP transport error: {0}")]
+    Http(reqwest::Error),
+    #[error("gRPC status error: {0}")]
+    Grpc(Box<tonic::Status>),
+    #[error("gRPC transport error: {0}")]
+    GrpcTransport(tonic::transport::Error),
+    #[error("Not found: {0}")]
+    NotFound(String),
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("Other error: {0}")]
+    Other(String),
+}
+
+impl From<reqwest::Error> for BlogClientError {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_status() {
+            if let Some(status) = e.status() {
+                if status == 401 {
+                    return BlogClientError::Unauthorized("Invalid token".into());
+                }
+                if status == 404 {
+                    return BlogClientError::NotFound("Resource not found".into());
+                }
+            }
+        }
+        BlogClientError::Http(e)
+    }
+}
+
+impl From<tonic::Status> for BlogClientError {
+    fn from(s: tonic::Status) -> Self {
+        match s.code() {
+            tonic::Code::Unauthenticated => BlogClientError::Unauthorized(s.message().into()),
+            tonic::Code::NotFound => BlogClientError::NotFound(s.message().into()),
+            _ => BlogClientError::Grpc(Box::new(s)),
+        }
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/src/lib.rs
+pub mod error;
+pub mod grpc_client;
+pub mod http_client;
+
+pub use error::BlogClientError;
+pub use grpc_client::GrpcClient;
+pub use http_client::{AuthResponse, HttpClient, Post, User};
+
+#[derive(Debug, Clone)]
+pub enum Transport {
+    Http(Option<String>),
+    Grpc(String),
+}
+
+pub struct BlogClient {
+    pub http: Option<HttpClient>,
+    pub grpc: Option<GrpcClient>,
+}
+
+impl BlogClient {
+    pub async fn new(transport: Transport) -> Result<Self, BlogClientError> {
+        let (http, grpc) = match &transport {
+            Transport::Http(base_url) => {
+                let client = HttpClient::new(base_url.clone());
+                (Some(client), None)
+            }
+            Transport::Grpc(addr) => {
+                let client = GrpcClient::new(addr.clone()).await?;
+                (None, Some(client))
+            }
+        };
+        Ok(Self { http, grpc })
+    }
+
+    fn ensure_http(&self) -> Result<&HttpClient, BlogClientError> {
+        self.http
+            .as_ref()
+            .ok_or_else(|| BlogClientError::Other("Not an HTTP transport".into()))
+    }
+
+    fn ensure_http_mut(&mut self) -> Result<&mut HttpClient, BlogClientError> {
+        self.http
+            .as_mut()
+            .ok_or_else(|| BlogClientError::Other("Not an HTTP transport".into()))
+    }
+
+    fn ensure_grpc_mut(&mut self) -> Result<&mut GrpcClient, BlogClientError> {
+        self.grpc
+            .as_mut()
+            .ok_or_else(|| BlogClientError::Other("Not a gRPC transport".into()))
+    }
+
+    pub fn set_token(&mut self, token: String) {
+        if let Some(http) = &mut self.http {
+            http.set_token(token.clone());
+        }
+        if let Some(grpc) = &mut self.grpc {
+            grpc.set_token(token);
+        }
+    }
+
+    pub fn get_token(&self) -> Option<String> {
+        if let Some(http) = &self.http {
+            http.get_token().cloned()
+        } else if let Some(grpc) = &self.grpc {
+            grpc.get_token().cloned()
+        } else {
+            None
+        }
+    }
+
+    pub async fn register(
+        &mut self,
+        username: String,
+        email: String,
+        password: String,
+    ) -> Result<AuthResponse, BlogClientError> {
+        if let Ok(http) = self.ensure_http_mut() {
+            http.register(username, email, password).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let (token, user) = grpc.register(username, email, password).await?;
+            Ok(AuthResponse {
+                token,
+                user: user.into(),
+            })
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn login(
+        &mut self,
+        username: String,
+        password: String,
+    ) -> Result<AuthResponse, BlogClientError> {
+        if let Ok(http) = self.ensure_http_mut() {
+            http.login(username, password).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let (token, user) = grpc.login(username, password).await?;
+            Ok(AuthResponse {
+                token,
+                user: user.into(),
+            })
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn create_post(
+        &mut self,
+        title: String,
+        content: String,
+    ) -> Result<Post, BlogClientError> {
+        if let Ok(http) = self.ensure_http() {
+            http.create_post(title, content).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let resp = grpc.create_post(title, content).await?;
+            Ok(Post {
+                id: resp.id,
+                title: resp.title,
+                content: resp.content,
+                author_id: resp.author_id,
+                created_at: resp.created_at,
+                updated_at: resp.updated_at,
+            })
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn get_post(&mut self, id: i64) -> Result<Post, BlogClientError> {
+        if let Ok(http) = self.ensure_http() {
+            http.get_post(id).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let resp = grpc.get_post(id).await?;
+            Ok(Post {
+                id: resp.id,
+                title: resp.title,
+                content: resp.content,
+                author_id: resp.author_id,
+                created_at: resp.created_at,
+                updated_at: resp.updated_at,
+            })
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn update_post(
+        &mut self,
+        id: i64,
+        title: String,
+        content: String,
+    ) -> Result<Post, BlogClientError> {
+        if let Ok(http) = self.ensure_http() {
+            http.update_post(id, title, content).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let resp = grpc.update_post(id, title, content).await?;
+            Ok(Post {
+                id: resp.id,
+                title: resp.title,
+                content: resp.content,
+                author_id: resp.author_id,
+                created_at: resp.created_at,
+                updated_at: resp.updated_at,
+            })
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn delete_post(&mut self, id: i64) -> Result<(), BlogClientError> {
+        if let Ok(http) = self.ensure_http() {
+            http.delete_post(id).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            grpc.delete_post(id).await
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn list_posts(
+        &mut self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<(Vec<Post>, i64), BlogClientError> {
+        if let Ok(http) = self.ensure_http() {
+            http.list_posts(limit, offset).await
+        } else if let Ok(grpc) = self.ensure_grpc_mut() {
+            let (posts, total) = grpc.list_posts(limit, offset).await?;
+            let mapped = posts
+                .into_iter()
+                .map(|p| Post {
+                    id: p.id,
+                    title: p.title,
+                    content: p.content,
+                    author_id: p.author_id,
+                    created_at: p.created_at,
+                    updated_at: p.updated_at,
+                })
+                .collect();
+            Ok((mapped, total as i64))
+        } else {
+            unreachable!()
+        }
+    }
+}
+
+impl From<grpc_client::User> for http_client::User {
+    fn from(u: grpc_client::User) -> Self {
+        Self {
+            id: u.id,
+            username: u.username,
+            email: u.email,
+            created_at: u.created_at,
+        }
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/blog-client/src/http_client.rs
+use crate::error::BlogClientError;
+
+use std::time::Duration;
+
+use reqwest::{header::HeaderMap, Client, StatusCode};
+use serde::{Deserialize, Serialize};
+
+const DEFAULT_API_BASE: &str = "http://localhost:3000";
+const REQUEST_TIMEOUT_SECS: u64 = 30;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthResponse {
+    pub token: String,
+    pub user: User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub email: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Post {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    pub author_id: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RegisterForm {
+    username: String,
+    email: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LoginForm {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreatePostForm {
+    title: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdatePostForm {
+    title: String,
+    content: String,
+}
+
+pub struct HttpClient {
+    client: Client,
+    base_url: String,
+    token: Option<String>,
+}
+
+impl HttpClient {
+    pub fn new(base_url: Option<String>) -> Self {
+        // Создаём клиент с тайм-аутом и пулом соединений
+        let client = Client::builder()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .build()
+            .expect("Failed to build HTTP client");
+        Self {
+            client,
+            base_url: base_url.unwrap_or_else(|| DEFAULT_API_BASE.to_string()),
+            token: None,
+        }
+    }
+
+    pub fn set_token(&mut self, token: String) {
+        self.token = Some(token);
+    }
+
+    pub fn get_token(&self) -> Option<&String> {
+        self.token.as_ref()
+    }
+
+    /// auth_headers формирует заголовки с JWT-токеном для авторизованных запросов
+    fn auth_headers(&self) -> Result<HeaderMap, BlogClientError> {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = &self.token {
+            let value = format!("Bearer {}", token);
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&value)
+                    .map_err(|e| BlogClientError::Other(e.to_string()))?,
+            );
+        }
+        Ok(headers)
+    }
+
+    // ----- Аутентификация -----
+    pub async fn register(
+        &mut self,
+        username: String,
+        email: String,
+        password: String,
+    ) -> Result<AuthResponse, BlogClientError> {
+        let url = format!("{}/api/auth/register", self.base_url);
+        let form = RegisterForm {
+            username,
+            email,
+            password,
+        };
+        let resp = self.client.post(&url).json(&form).send().await?;
+        let status = resp.status();
+        let auth_resp: AuthResponse = resp.json().await?;
+        if status == StatusCode::CREATED {
+            self.token = Some(auth_resp.token.clone());
+            Ok(auth_resp)
+        } else {
+            Err(BlogClientError::Other("Registration failed".into()))
+        }
+    }
+
+    pub async fn login(
+        &mut self,
+        username: String,
+        password: String,
+    ) -> Result<AuthResponse, BlogClientError> {
+        let url = format!("{}/api/auth/login", self.base_url);
+        let form = LoginForm { username, password };
+        let resp = self.client.post(&url).json(&form).send().await?;
+        let status = resp.status();
+        let auth_resp: AuthResponse = resp.json().await?;
+        if status == StatusCode::OK {
+            self.token = Some(auth_resp.token.clone());
+            Ok(auth_resp)
+        } else {
+            Err(BlogClientError::Other("Login failed".into()))
+        }
+    }
+
+    // ----- CRUD постов -----
+    pub async fn create_post(
+        &self,
+        title: String,
+        content: String,
+    ) -> Result<Post, BlogClientError> {
+        let url = format!("{}/api/posts", self.base_url);
+        let form = CreatePostForm { title, content };
+        let resp = self
+            .client
+            .post(&url)
+            .headers(self.auth_headers()?)
+            .json(&form)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::CREATED {
+            Ok(resp.json().await?)
+        } else {
+            Err(BlogClientError::Other("Create post failed".into()))
+        }
+    }
+
+    pub async fn get_post(&self, id: i64) -> Result<Post, BlogClientError> {
+        let url = format!("{}/api/posts/{}", self.base_url, id);
+        let resp = self.client.get(&url).send().await?;
+        if resp.status() == StatusCode::OK {
+            Ok(resp.json().await?)
+        } else if resp.status() == StatusCode::NOT_FOUND {
+            Err(BlogClientError::NotFound("Post not found".into()))
+        } else {
+            Err(BlogClientError::Other("Get post failed".into()))
+        }
+    }
+
+    pub async fn update_post(
+        &self,
+        id: i64,
+        title: String,
+        content: String,
+    ) -> Result<Post, BlogClientError> {
+        let url = format!("{}/api/posts/{}", self.base_url, id);
+        let form = UpdatePostForm { title, content };
+        let resp = self
+            .client
+            .put(&url)
+            .headers(self.auth_headers()?)
+            .json(&form)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::OK {
+            Ok(resp.json().await?)
+        } else if resp.status() == StatusCode::NOT_FOUND {
+            Err(BlogClientError::NotFound("Post not found".into()))
+        } else if resp.status() == StatusCode::FORBIDDEN {
+            Err(BlogClientError::Unauthorized("Not the author".into()))
+        } else {
+            Err(BlogClientError::Other("Update failed".into()))
+        }
+    }
+
+    pub async fn delete_post(&self, id: i64) -> Result<(), BlogClientError> {
+        let url = format!("{}/api/posts/{}", self.base_url, id);
+        let resp = self
+            .client
+            .delete(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+        if resp.status() == StatusCode::NO_CONTENT {
+            Ok(())
+        } else if resp.status() == StatusCode::NOT_FOUND {
+            Err(BlogClientError::NotFound("Post not found".into()))
+        } else if resp.status() == StatusCode::FORBIDDEN {
+            Err(BlogClientError::Unauthorized("Not the author".into()))
+        } else {
+            Err(BlogClientError::Other("Delete failed".into()))
+        }
+    }
+
+    pub async fn list_posts(
+        &self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<(Vec<Post>, i64), BlogClientError> {
+        let url = format!(
+            "{}/api/posts?limit={}&offset={}",
+            self.base_url, limit, offset
+        );
+        let resp = self.client.get(&url).send().await?;
+        #[derive(Deserialize)]
+        struct ListResponse {
+            posts: Vec<Post>,
+            total: i64,
+        }
+        let list: ListResponse = resp.json().await?;
+        Ok((list.posts, list.total))
+    }
+}
+
+
+# /Users/laztrex/RustProjects/blog-project/.github/workflows/ci.yaml
+name: CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint with clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build workspace
+        run: cargo build --workspace --verbose
+      - name: Run unit tests (no DB required)
+        run: cargo test -p blog-server
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: blog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Run integration tests
+        run: cargo test -p blog-server --test integration_test -- --nocapture
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost/blog_test
+

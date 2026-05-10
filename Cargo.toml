@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+members = [
+    "blog-server",
+    "blog-client",
+    "blog-cli",
+    "blog-wasm",
+]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+dirs = "5"
+
+tonic = "0.13"
+tonic-build = "0.13"
+prost = "0.13"
+prost-types = "0.13"
+
+actix-web = "4"
+actix-cors = "0.7"
+actix-web-httpauth = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "migrate", "chrono"] }
+dotenvy = "0.15"
+
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.69", features = [
+    "ReadableStream",
+    "Window",
+    "Document",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlButtonElement",
+    "HtmlTextAreaElement",
+    "Element",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "Storage",
+    "console"
+] }
+gloo-net = "0.6"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+
+clap = { version = "4", features = ["derive"] }

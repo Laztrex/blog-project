@@ -1,0 +1,7 @@
+/target/
+**/*.rs.bk
+.env
+.blog_token
+Cargo.lock
+*.wasm
+pkg/

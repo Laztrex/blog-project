@@ -1,0 +1,175 @@
+# ============================================================
+# 1. ПОДГОТОВКА ОКРУЖЕНИЯ (выполняется в первом терминале)
+# ============================================================
+
+git clone <url-вашего-репозитория> blog-project
+cd blog-project
+
+# Запуск PostgreSQL через Docker
+docker run -d --name blog-db -e POSTGRES_PASSWORD=password -e POSTGRES_DB=blog_db -p 5432:5432 postgres:15
+
+# Проверка, что контейнер запущен
+docker ps | grep blog-db
+
+# Настройка переменных окружения
+cd blog-server
+cp .env.example .env
+cat .env   # убедитесь, что DATABASE_URL и JWT_SECRET заданы
+cd ..
+
+# Сборка всего workspace
+cargo build --workspace
+
+# ============================================================
+# 2. ЗАПУСК СЕРВЕРА (второй терминал)
+# ============================================================
+
+cd /path/to/blog-project   # укажите полный путь к проекту
+cargo run --bin blog-server
+
+# Ожидаемый вывод:
+# INFO: Database migrations applied
+# INFO: Starting servers: HTTP on 0.0.0.0:3000, gRPC on 0.0.0.0:50051
+
+# ============================================================
+# 3. ПРОВЕРКА HTTP API (третий терминал)
+# ============================================================
+
+# Регистрация
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","email":"alice@example.com","password":"secret"}'
+
+# Логин (сохраните token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret"}'
+
+# Создание поста (замените TOKEN на полученный)
+TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+curl -X POST http://localhost:3000/api/posts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Hello from curl","content":"This is my first post"}'
+
+# Получение поста (публичный)
+curl http://localhost:3000/api/posts/1
+
+# Список постов с пагинацией
+curl "http://localhost:3000/api/posts?limit=5&offset=0"
+
+# Обновление поста
+curl -X PUT http://localhost:3000/api/posts/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Updated title","content":"Updated content"}'
+
+# Удаление поста
+curl -X DELETE http://localhost:3000/api/posts/1 \
+  -H "Authorization: Bearer $TOKEN"
+
+# ============================================================
+# 4. ПРОВЕРКА gRPC API (требуется grpcurl)
+# ============================================================
+
+# Установка grpcurl (если не установлен)
+# macOS: brew install grpcurl
+# Linux: go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+
+# Регистрация
+grpcurl -plaintext -d '{"username":"bob","email":"bob@ex.com","password":"123"}' \
+  localhost:50051 blog.BlogService/Register
+
+# Логин (сохраните token)
+grpcurl -plaintext -d '{"username":"bob","password":"123"}' \
+  localhost:50051 blog.BlogService/Login
+
+# Создание поста (замените TOKEN_GRPC)
+TOKEN_GRPC="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+grpcurl -plaintext -H "Authorization: Bearer $TOKEN_GRPC" \
+  -d '{"title":"gRPC post","content":"via tonic"}' \
+  localhost:50051 blog.BlogService/CreatePost
+
+# Список постов
+grpcurl -plaintext -d '{"limit":10,"offset":0}' \
+  localhost:50051 blog.BlogService/ListPosts
+
+# ============================================================
+# 5. ПРОВЕРКА CLI-КЛИЕНТА (третий терминал, или тот же после curl)
+# ============================================================
+
+# Регистрация (HTTP)
+cargo run --bin blog-cli -- register --username charlie --email charlie@ex.com --password pass
+
+# Логин
+cargo run --bin blog-cli -- login --username charlie --password pass
+
+# Создание поста (HTTP)
+cargo run --bin blog-cli -- create --title "CLI post" --content "Hello from CLI"
+
+# Список постов
+cargo run --bin blog-cli -- list --limit 5
+
+# Получение поста
+cargo run --bin blog-cli -- get --id 2   (id может быть другим)
+
+# Обновление поста
+cargo run --bin blog-cli -- update --id 2 --title "Updated CLI title" --content "New content"
+
+# Удаление поста
+cargo run --bin blog-cli -- delete --id 2
+
+# Использование gRPC-транспорта
+cargo run --bin blog-cli -- --grpc create --title "gRPC via CLI" --content "Works!"
+
+# ============================================================
+# 6. ПРОВЕРКА WASM-ФРОНТЕНДА (четвёртый терминал)
+# ============================================================
+
+cd blog-wasm
+wasm-pack build --target web
+python3 -m http.server 8000
+
+# Откройте браузер по адресу http://localhost:8000
+# Выполните:
+# - Регистрацию нового пользователя (username, email, password)
+# - Вход
+# - Создание поста
+# - Редактирование и удаление поста (кнопки Edit/Delete должны быть видны только для ваших постов)
+# - Выход (кнопка Logout)
+
+# ============================================================
+# 7. ЗАПУСК ТЕСТОВ (третий или пятый терминал)
+# ============================================================
+
+# Модульные тесты доменных моделей
+cargo test --package blog-server --lib
+
+# Интеграционные тесты (требуют тестовой БД)
+docker exec -it blog-db psql -U postgres -c "CREATE DATABASE blog_test;"
+cargo test --package blog-server --test integration_test -- --nocapture
+
+# Все тесты workspace
+cargo test --workspace
+
+# ============================================================
+# 8. ФОРМАТИРОВАНИЕ И ЛИНТИНГ
+# ============================================================
+
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+
+# ============================================================
+# 9. ПРОВЕРКА МИГРАЦИЙ (вручную)
+# ============================================================
+
+docker exec -it blog-db psql -U postgres -d blog_db -c "\dt"
+docker exec -it blog-db psql -U postgres -d blog_db -c "SELECT * FROM users;"
+docker exec -it blog-db psql -U postgres -d blog_db -c "SELECT * FROM posts;"
+
+# ============================================================
+# 10. ОСТАНОВКА И ОЧИСТКА (по желанию)
+# ============================================================
+
+docker rm -f blog-db
+cargo clean
