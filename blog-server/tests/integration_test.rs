@@ -6,35 +6,51 @@ mod tests {
     };
     use blog_server::domain::post::Post;
     use sqlx::PgPool;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// prepare_database подготавливает тестовую базу данных: применяет миграции, если таблицы не существуют.
-    /// Эта функция вызывается один раз в каждом тесте.
-    async fn prepare_database(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
-        sqlx::migrate!().run(pool).await?;
-        Ok(())
+    /// get_test_pool создаёт пул подключений к тестовой БД и применяет миграции.
+    async fn get_test_pool() -> Result<PgPool, Box<dyn std::error::Error>> {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:password@localhost/blog_test".to_string());
+        let pool = sqlx::PgPool::connect(&database_url).await?;
+        sqlx::migrate!().run(&pool).await?;
+        Ok(pool)
     }
 
-    // sqlx::test автоматически создаёт транзакцию и откатывает её после теста,
-    // данные не остаются в БД.
-    #[sqlx::test]
-    async fn test_user_crud(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-        prepare_database(&pool).await?;
+    fn unique_name(base: &str) -> String {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string();
+        format!("{}_{}", base, timestamp)
+    }
+
+    #[tokio::test]
+    async fn test_user_crud() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = get_test_pool().await?;
         let repo = PostgresUserRepository::new(pool);
-        let user = repo.create("testuser", "test@ex.com", "hash").await?;
-        assert_eq!(user.username, "testuser");
-        let found = repo.find_by_username("testuser").await?;
+        let username = unique_name("testuser");
+        let user = repo
+            .create(&username, &format!("{}@ex.com", username), "hash")
+            .await?;
+        assert_eq!(user.username, username);
+        let found = repo.find_by_username(&username).await?;
         assert_eq!(found.id, user.id);
         let by_id = repo.find_by_id(user.id).await?;
-        assert_eq!(by_id.email, "test@ex.com");
+        assert_eq!(by_id.email, format!("{}@ex.com", username));
         Ok(())
     }
 
-    #[sqlx::test]
-    async fn test_post_crud(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-        prepare_database(&pool).await?;
+    #[tokio::test]
+    async fn test_post_crud() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = get_test_pool().await?;
         let user_repo = PostgresUserRepository::new(pool.clone());
         let post_repo = PostgresPostRepository::new(pool);
-        let user = user_repo.create("author", "author@ex.com", "hash").await?;
+        let username = unique_name("author");
+        let user = user_repo
+            .create(&username, &format!("{}@ex.com", username), "hash")
+            .await?;
         let post = Post::new("Title".to_string(), "Content".to_string(), user.id);
         let created = post_repo.create(&post).await?;
         assert_eq!(created.title, "Title");
